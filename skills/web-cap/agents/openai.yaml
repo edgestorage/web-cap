@@ -1,0 +1,4 @@
+interface:
+  display_name: "Web Cap"
+  short_description: "Install and use the web-cap CLI for browser automation"
+  default_prompt: "Use $web-cap to install web-capability and run browser automation through the web-cap CLI."

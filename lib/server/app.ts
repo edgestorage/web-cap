@@ -1,0 +1,173 @@
+import {
+  type CloudScriptRecord,
+  type ScriptDefinition,
+  type ScriptSearchFilters,
+} from '@shared/script-schema';
+import type {
+  BrowserCommandResult,
+  ScriptExecutionHistoryEntry,
+} from '@shared/protocol';
+import type { CreateTabInput, WaitEventsInput } from '@shared/browser-command-contracts';
+import { builtinScripts, builtinScriptRecords } from './scripts/builtin-scripts';
+import type {
+  ExecuteScriptRequest,
+  ExecuteScriptResult,
+  WebCapAgentService,
+} from './agent/contracts';
+import type { ScriptProvider } from './providers/script-provider';
+import { CloudScriptProvider } from './providers/cloud-script-provider';
+import { CompositeScriptProvider } from './providers/composite-script-provider';
+import { FileScriptProvider } from './providers/file-script-provider';
+import { MemoryScriptProvider } from './providers/memory-script-provider';
+import type { RuntimeBridge } from './runtime/runtime-bridge';
+import { ScriptExecutionHistory } from './scripts/execution-history';
+import { resolveWebCapStateDir } from './state-dir';
+import { BrowserSessionService } from './browser/session-service';
+import { ScriptExecutionService } from './scripts/execution-service';
+import { ScriptRegistryService } from './scripts/registry-service';
+
+export interface WebCapAppOptions {
+  scriptProvider?: ScriptProvider;
+  runtimeBridge: RuntimeBridge;
+  scriptExecutionHistory?: ScriptExecutionHistory;
+}
+
+export type {
+  ExecuteScriptOptions,
+  ExecuteScriptRequest,
+  ExecuteScriptResult,
+  WebCapAgentService,
+} from './agent/contracts';
+
+export class WebCapAgentApp implements WebCapAgentService {
+  public readonly scriptProvider: ScriptProvider;
+  public readonly runtimeBridge: RuntimeBridge;
+  public readonly scriptExecutionHistory: ScriptExecutionHistory;
+  private readonly browserSessionService: BrowserSessionService;
+  private readonly scriptExecutionService: ScriptExecutionService;
+  private readonly scriptRegistryService: ScriptRegistryService;
+
+  constructor(options: WebCapAppOptions) {
+    this.scriptProvider =
+      options.scriptProvider ?? createDefaultScriptProvider(process.env);
+    this.runtimeBridge = options.runtimeBridge;
+    this.scriptExecutionHistory =
+      options.scriptExecutionHistory ?? createDefaultScriptExecutionHistory(process.env);
+    this.browserSessionService = new BrowserSessionService(this.runtimeBridge);
+    this.scriptRegistryService = new ScriptRegistryService(
+      this.scriptProvider,
+      this.scriptExecutionHistory,
+    );
+    this.scriptExecutionService = new ScriptExecutionService({
+      runtimeBridge: this.runtimeBridge,
+      scriptExecutionHistory: this.scriptExecutionHistory,
+      registryService: this.scriptRegistryService,
+      browserSessionService: this.browserSessionService,
+      onHistoryChanged: () => this.syncScriptHistory(),
+      onRegistryChanged: () => this.syncScriptRegistry(),
+    });
+  }
+
+  async start(): Promise<void> {
+    await this.runtimeBridge.start();
+  }
+
+  async close(): Promise<void> {
+    await this.runtimeBridge.close();
+  }
+
+  async scriptSearch(query: string, filters?: ScriptSearchFilters) {
+    return await this.scriptRegistryService.search(query, filters);
+  }
+
+  async scriptGet(scriptId: string, version?: string) {
+    return await this.scriptRegistryService.getSchemaSummary(scriptId, version);
+  }
+
+  async scriptExecute(request: ExecuteScriptRequest): Promise<ExecuteScriptResult> {
+    return await this.scriptExecutionService.executeInline(request);
+  }
+
+  async scriptHistoryList(limit?: number): Promise<ScriptExecutionHistoryEntry[]> {
+    const entries = await this.scriptExecutionHistory.list();
+    if (limit === undefined) {
+      return entries;
+    }
+
+    return entries.slice(0, Math.max(0, limit));
+  }
+
+  async scriptRegistryList(): Promise<ScriptDefinition[]> {
+    return await this.scriptRegistryService.buildRegisteredScriptRegistry();
+  }
+
+  async scriptRegister(rawScriptDefinition: unknown): Promise<CloudScriptRecord> {
+    const record = await this.scriptRegistryService.register(rawScriptDefinition);
+    await this.syncScriptRegistry();
+    return record;
+  }
+
+  async browserNewTab(input: CreateTabInput): Promise<BrowserCommandResult> {
+    return await this.browserSessionService.newTab(input);
+  }
+
+  async browserWaitEvents(
+    input: WaitEventsInput,
+    onEvent?: (event: Record<string, unknown>) => void,
+  ): Promise<BrowserCommandResult> {
+    return await this.browserSessionService.waitEvents(input, onEvent);
+  }
+
+  sessionStatus() {
+    return this.browserSessionService.status();
+  }
+
+  private async syncScriptHistory(): Promise<void> {
+    if (typeof this.runtimeBridge.syncScriptHistory !== 'function') {
+      return;
+    }
+
+    await this.runtimeBridge.syncScriptHistory(await this.scriptExecutionHistory.list());
+  }
+
+  private async syncScriptRegistry(): Promise<void> {
+    if (typeof this.runtimeBridge.syncScriptRegistry !== 'function') {
+      return;
+    }
+
+    await this.runtimeBridge.syncScriptRegistry(await this.scriptRegistryList());
+  }
+}
+
+interface ScriptProviderEnvironment {
+  WEB_CAP_SCRIPT_REGISTRY_URL?: string;
+  WEB_CAP_SCRIPT_REGISTRY_API_KEY?: string;
+  WEB_CAP_STATE_DIR?: string;
+}
+
+export function createDefaultScriptProvider(
+  env: ScriptProviderEnvironment = process.env,
+): ScriptProvider {
+  const stateDir = resolveWebCapStateDir(env);
+  const builtinProvider = new MemoryScriptProvider([...builtinScriptRecords]);
+  const cloudProvider = new CloudScriptProvider({
+    baseUrl: env.WEB_CAP_SCRIPT_REGISTRY_URL,
+    apiKey: env.WEB_CAP_SCRIPT_REGISTRY_API_KEY,
+    fallback: null,
+  });
+  const fileProvider = new FileScriptProvider(stateDir);
+
+  return new CompositeScriptProvider({
+    providers: [builtinProvider, cloudProvider, fileProvider],
+    writableProviders: [cloudProvider, fileProvider],
+  });
+}
+
+export function createDefaultScriptExecutionHistory(
+  env: ScriptProviderEnvironment = process.env,
+): ScriptExecutionHistory {
+  const stateDir = resolveWebCapStateDir(env);
+  return new ScriptExecutionHistory(`${stateDir}/script-execution-history.json`);
+}
+
+export { builtinScripts };

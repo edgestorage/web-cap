@@ -1,0 +1,875 @@
+import type { ScriptDefinition } from '@shared/script-schema';
+import {
+  DEFAULT_RUNTIME_PORT,
+  RUNTIME_HEARTBEAT_INTERVAL_MS,
+  createRuntimeEnvelope,
+  type BrowserCommandName,
+  type ExecutionEvidence,
+  type ExecutionEvidenceEvent,
+  type RuntimeEnvelope,
+  type ScriptExecutionHistoryEntry,
+  type RuntimeTabSnapshot,
+} from '@shared/protocol';
+import { DebuggerScriptExecutor } from '../runtime/debugger-executor';
+import {
+  scriptRequiresBrowserLevelClick,
+  scriptRequiresBrowserLevelKeyboard,
+  scriptRequiresBrowserLevelWindow,
+} from '../runtime/click-routing';
+import {
+  isDebuggerFallbackEligibleError,
+  isExecutionInterruptedByNavigationError,
+  type ScriptExecutionResponse,
+} from '../runtime/execution-helpers';
+import { BrowserCommandHandler } from '../runtime/browser-command-handler';
+import { UserScriptExecutor } from '../runtime/user-script-executor';
+
+const PROTOCOL_VERSION = '2026-05-05';
+const AUTHENTICATED_SITES_KEY = 'authenticatedSites';
+const SCRIPT_HISTORY_STORAGE_KEY = 'scriptExecutionHistory';
+const SCRIPT_HISTORY_UPDATED_AT_STORAGE_KEY = 'scriptExecutionHistoryUpdatedAt';
+const SCRIPT_REGISTRY_STORAGE_KEY = 'scriptRegistry';
+const SCRIPT_REGISTRY_UPDATED_AT_STORAGE_KEY = 'scriptRegistryUpdatedAt';
+const EXECUTION_TITLE_PREFIX = '[WEB_CAP 执行中]';
+const EXECUTION_TAB_INDICATOR_TIMEOUT_MS = 1_000;
+
+interface BrowserTabLike {
+  id?: number;
+  url?: string;
+  title?: string;
+  active?: boolean;
+  openerTabId?: number;
+}
+
+type ExecutableBrowserTab = BrowserTabLike & {
+  id: number;
+  url: string;
+};
+
+interface ExecutionTabUpdate {
+  tabId: number;
+  status?: string;
+  url?: string;
+}
+
+interface ExecutionObservation {
+  requestId: string;
+  tabId: number;
+  startedUrl: string;
+  createdTabs: Map<number, BrowserTabLike>;
+  targetUpdates: ExecutionTabUpdate[];
+}
+
+interface ExecutionTabIndicatorState {
+  requestIds: Set<string>;
+}
+
+interface VisibleElementsDebugTiming {
+  scriptTimingMs: number;
+  beforeSnapshotTimingMs: number;
+  postActionDelayMs: number;
+  afterSnapshotTimingMs: number;
+  diffTimingMs: number;
+}
+
+type ExecutionEvidenceWithDebugTiming = ExecutionEvidence & {
+  visibleElementsDebugTiming?: VisibleElementsDebugTiming;
+};
+
+class RuntimeClient {
+  private socket?: WebSocket;
+  private heartbeatTimer?: number;
+  private reconnectTimer?: number;
+  private sessionId = 'extension-pending';
+  private lastActiveTabId?: number;
+  private readonly executionObservations: ExecutionObservation[] = [];
+  private readonly executionTabIndicators = new Map<number, ExecutionTabIndicatorState>();
+  private readonly userScriptExecutor = new UserScriptExecutor();
+  private readonly debuggerExecutor = new DebuggerScriptExecutor();
+  private readonly browserCommandHandler = new BrowserCommandHandler({
+    setLastActiveTabId: (tabId) => {
+      this.lastActiveTabId = tabId;
+    },
+    sendTabSnapshot: () => this.sendTabSnapshot(),
+    toTabSnapshot: (tab) => this.toTabSnapshot(tab),
+  });
+
+  start(): void {
+    this.connect();
+    this.installTabListeners();
+  }
+
+  private connect(): void {
+    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+      return;
+    }
+
+    this.socket = new WebSocket(`ws://127.0.0.1:${DEFAULT_RUNTIME_PORT}`);
+
+    this.socket.addEventListener('open', async () => {
+      const authenticatedSites = await this.getAuthenticatedSites();
+      this.send(
+        createRuntimeEnvelope(
+          'hello',
+          {
+            browserName: 'webextension',
+            extensionVersion: browser.runtime.getManifest().version,
+            protocolVersion: PROTOCOL_VERSION,
+            authenticatedSites,
+          },
+          {
+            sessionId: this.sessionId,
+          },
+        ),
+      );
+
+      await this.sendTabSnapshot();
+      this.heartbeatTimer = setInterval(() => {
+        this.send(createRuntimeEnvelope('heartbeat', {}, { sessionId: this.sessionId }));
+      }, RUNTIME_HEARTBEAT_INTERVAL_MS) as unknown as number;
+    });
+
+    this.socket.addEventListener('message', async (event) => {
+      const envelope = JSON.parse(String(event.data)) as RuntimeEnvelope;
+      await this.handleEnvelope(envelope);
+    });
+
+    this.socket.addEventListener('close', () => {
+      if (this.heartbeatTimer) {
+        clearInterval(this.heartbeatTimer);
+      }
+      this.scheduleReconnect();
+    });
+
+    this.socket.addEventListener('error', () => {
+      this.socket?.close();
+    });
+  }
+
+  private scheduleReconnect(): void {
+    if (this.reconnectTimer) {
+      return;
+    }
+
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = undefined;
+      this.connect();
+    }, 3000) as unknown as number;
+  }
+
+  private async handleEnvelope(envelope: RuntimeEnvelope): Promise<void> {
+    switch (envelope.type) {
+      case 'hello_ack':
+        this.sessionId = envelope.payload.sessionId;
+        break;
+      case 'execute_script':
+        await this.handleExecuteScript(
+          envelope.requestId,
+          envelope.payload.scriptDefinition,
+          envelope.payload.input,
+          envelope.payload.scriptRegistry,
+          envelope.payload.tabId,
+          envelope.payload.activateTab,
+        );
+        break;
+      case 'browser_command':
+        await this.handleBrowserCommand(
+          envelope.requestId,
+          envelope.payload.command,
+          envelope.payload.input,
+          envelope.payload.tabId,
+        );
+        break;
+      case 'script_history_sync':
+        await this.storeScriptHistory(envelope.payload.entries, envelope.timestamp);
+        break;
+      case 'script_registry_sync':
+        await this.storeScriptRegistry(envelope.payload.scripts, envelope.timestamp);
+        break;
+      default:
+        break;
+    }
+  }
+
+  private async handleExecuteScript(
+    requestId: string,
+    scriptDefinition: ScriptDefinition,
+    input: Record<string, unknown>,
+    scriptRegistry: ScriptDefinition[],
+    tabId?: number,
+    activateTab?: boolean,
+  ): Promise<void> {
+    const selectedTab = tabId ? await browser.tabs.get(tabId) : await this.getActiveTab();
+    if (!selectedTab?.id || !selectedTab.url) {
+      this.sendError(requestId, 'TAB_NOT_FOUND', 'No active browser tab is available.', {
+        scriptId: scriptDefinition.id,
+      });
+      return;
+    }
+    let activeTab: ExecutableBrowserTab = {
+      ...selectedTab,
+      id: selectedTab.id,
+      url: selectedTab.url,
+    };
+    if (activateTab === true) {
+      activeTab = await this.activateExecutionTab(activeTab);
+    }
+
+    const observation = this.startExecutionObservation(requestId, activeTab.id, activeTab.url);
+
+    try {
+      console.info('[WEB_CAP] executing script', {
+        id: scriptDefinition.id,
+        name: scriptDefinition.name,
+        version: scriptDefinition.version,
+        type: scriptDefinition.type,
+      });
+
+      await this.startExecutionTabIndicator(activeTab.id, requestId);
+
+      let response: ScriptExecutionResponse;
+      try {
+        response = await this.executeScriptWithFallback(
+          requestId,
+          activeTab.id,
+          scriptDefinition,
+          input,
+          scriptRegistry,
+        );
+      } catch (error) {
+        if (!isExecutionInterruptedByNavigationError(error)) {
+          throw error;
+        }
+
+        const evidence = this.createNavigationInterruptedEvidence(activeTab.url);
+        await this.wait(300);
+        evidence.events.push(
+          ...(await this.finishExecutionObservation(observation, evidence.events)),
+        );
+        this.send(
+          createRuntimeEnvelope(
+            'execution_result',
+            {
+              result: { navigated: true },
+              evidence,
+              status: 'interrupted',
+            },
+            { sessionId: this.sessionId, requestId },
+          ),
+        );
+        return;
+      }
+
+      const evidence: ExecutionEvidence = response.evidence ?? {
+        url: activeTab.url,
+        events: [],
+        screenshots: [],
+      };
+
+      if (!response.ok || !response.result) {
+        throw new Error(response?.error ?? 'Script execution failed.');
+      }
+      const result = response.result;
+
+      await this.wait(300);
+      evidence.events.push(
+        ...(await this.finishExecutionObservation(observation, evidence.events)),
+      );
+
+      if (evidence.visibleElements) {
+        const visibleElementsDebugTiming = (evidence as ExecutionEvidenceWithDebugTiming)
+          .visibleElementsDebugTiming;
+        console.info('[WEB_CAP] visible elements diff', evidence.visibleElements);
+        console.info(
+          '[WEB_CAP] visible elements diff json',
+          JSON.stringify(evidence.visibleElements, null, 2),
+        );
+        console.info(
+          '[WEB_CAP] visible elements diff timing ms',
+          evidence.visibleElementsTimingMs ?? null,
+        );
+        if (visibleElementsDebugTiming) {
+          console.info(
+            '[WEB_CAP] visible elements diff timing breakdown ms',
+            visibleElementsDebugTiming,
+          );
+        }
+      }
+
+      this.send(
+        createRuntimeEnvelope(
+          'execution_result',
+          {
+            result,
+            evidence,
+            status: response.status ?? 'succeeded',
+          },
+          { sessionId: this.sessionId, requestId },
+        ),
+      );
+    } catch (error) {
+      this.cancelExecutionObservation(observation);
+      this.sendError(
+        requestId,
+        'EXECUTION_FAILED',
+        error instanceof Error ? error.message : String(error),
+        { scriptId: scriptDefinition.id, tabId: activeTab.id },
+      );
+    } finally {
+      await this.stopExecutionTabIndicator(activeTab.id, requestId);
+    }
+  }
+
+  private async activateExecutionTab(tab: ExecutableBrowserTab): Promise<ExecutableBrowserTab> {
+    if (tab.active) {
+      return tab;
+    }
+
+    const activated = await browser.tabs.update(tab.id, { active: true });
+    this.lastActiveTabId = activated?.id ?? tab.id;
+    await this.sendTabSnapshot();
+    return {
+      ...tab,
+      ...activated,
+      id: activated?.id ?? tab.id,
+      url: activated?.url ?? tab.url,
+    };
+  }
+
+  private async executeScriptWithFallback(
+    requestId: string,
+    tabId: number,
+    scriptDefinition: ScriptDefinition,
+    input: Record<string, unknown>,
+    scriptRegistry: ScriptDefinition[],
+  ): Promise<ScriptExecutionResponse> {
+    const requiresBrowserLevelClick = scriptRequiresBrowserLevelClick(
+      scriptDefinition,
+      scriptRegistry,
+    );
+    const requiresBrowserLevelKeyboard = scriptRequiresBrowserLevelKeyboard(
+      scriptDefinition,
+      scriptRegistry,
+    );
+    const requiresBrowserLevelWindow = scriptRequiresBrowserLevelWindow(
+      scriptDefinition,
+      scriptRegistry,
+    );
+
+    if (requiresBrowserLevelClick || requiresBrowserLevelKeyboard || requiresBrowserLevelWindow) {
+      if (!this.debuggerExecutor.isAvailable()) {
+        throw new Error(
+          `Script ${scriptDefinition.id} requires browser-level automation, but chrome.debugger is not available in this browser runtime.`,
+        );
+      }
+
+      return await this.debuggerExecutor.executeScript(
+        tabId,
+        scriptDefinition,
+        input,
+        scriptRegistry,
+      );
+    }
+
+    try {
+      if (!this.userScriptExecutor.isAvailable()) {
+        throw new Error('chrome.userScripts.execute is not available in this browser runtime.');
+      }
+
+      return await this.userScriptExecutor.executeScript(
+        tabId,
+        scriptDefinition,
+        input,
+        scriptRegistry,
+      );
+    } catch (error) {
+      if (
+        !this.debuggerExecutor.isAvailable() ||
+        !isDebuggerFallbackEligibleError(error)
+      ) {
+        throw error;
+      }
+
+      return await this.debuggerExecutor.executeScript(
+        tabId,
+        scriptDefinition,
+        input,
+        scriptRegistry,
+      );
+    }
+  }
+
+  private async handleBrowserCommand(
+    requestId: string,
+    command: BrowserCommandName,
+    input: Record<string, unknown>,
+    tabId?: number,
+  ): Promise<void> {
+    const activeTab = tabId ? await browser.tabs.get(tabId) : await this.getActiveTab();
+    if (!activeTab?.id || !activeTab.url) {
+      this.sendError(requestId, 'TAB_NOT_FOUND', 'No active browser tab is available.', {
+        command,
+      });
+      return;
+    }
+
+    try {
+      const response = await this.browserCommandHandler.execute(
+        activeTab.id,
+        command,
+        input,
+        (event) => {
+          this.send(
+            createRuntimeEnvelope(
+              'browser_command_event',
+              {
+                event,
+              },
+              { sessionId: this.sessionId, requestId },
+            ),
+          );
+        },
+      );
+      if (!response.ok || !response.result) {
+        throw new Error(response.error ?? `Browser command ${command} failed.`);
+      }
+
+      this.send(
+        createRuntimeEnvelope(
+          'browser_command_result',
+          {
+            result: response.result,
+          },
+          { sessionId: this.sessionId, requestId },
+        ),
+      );
+    } catch (error) {
+      this.sendError(
+        requestId,
+        'EXECUTION_FAILED',
+        error instanceof Error ? error.message : String(error),
+        { command, tabId: activeTab.id },
+      );
+    }
+  }
+
+  private installTabListeners(): void {
+    browser.tabs.onActivated.addListener(async (activeInfo: { tabId: number }) => {
+      this.lastActiveTabId = activeInfo.tabId;
+      await this.sendTabSnapshot();
+    });
+
+    browser.tabs.onUpdated.addListener(
+      async (_tabId: number, changeInfo: { status?: string; url?: string }) => {
+        this.recordExecutionTabUpdate(_tabId, changeInfo);
+        if (changeInfo.status === 'complete') {
+          await this.refreshExecutionTabIndicator(_tabId);
+          await this.sendTabSnapshot();
+        }
+      },
+    );
+
+    browser.tabs.onCreated.addListener(async (tab: BrowserTabLike) => {
+      this.recordExecutionTabCreated(tab);
+      if (tab.id) {
+        this.lastActiveTabId = tab.id;
+      }
+      await this.sendTabSnapshot();
+    });
+
+    browser.tabs.onRemoved.addListener(async (tabId: number) => {
+      if (this.lastActiveTabId === tabId) {
+        this.lastActiveTabId = undefined;
+      }
+      this.executionTabIndicators.delete(tabId);
+      await this.sendTabSnapshot();
+    });
+
+    browser.runtime.onInstalled.addListener(async () => {
+      const stored = await browser.storage.local.get([
+        AUTHENTICATED_SITES_KEY,
+        SCRIPT_HISTORY_STORAGE_KEY,
+        SCRIPT_HISTORY_UPDATED_AT_STORAGE_KEY,
+      ]);
+      const update: Record<string, unknown> = {};
+
+      if (!Array.isArray(stored[AUTHENTICATED_SITES_KEY])) {
+        update[AUTHENTICATED_SITES_KEY] = [];
+      }
+
+      if (!Array.isArray(stored[SCRIPT_HISTORY_STORAGE_KEY])) {
+        update[SCRIPT_HISTORY_STORAGE_KEY] = [];
+      }
+
+      if (typeof stored[SCRIPT_HISTORY_UPDATED_AT_STORAGE_KEY] !== 'string') {
+        update[SCRIPT_HISTORY_UPDATED_AT_STORAGE_KEY] = '';
+      }
+
+      if (Object.keys(update).length > 0) {
+        await browser.storage.local.set(update);
+      }
+    });
+  }
+
+  private async startExecutionTabIndicator(
+    tabId: number,
+    requestId: string,
+  ): Promise<void> {
+    const existing = this.executionTabIndicators.get(tabId);
+    if (existing) {
+      existing.requestIds.add(requestId);
+      await this.applyExecutionTabIndicator(tabId);
+      return;
+    }
+
+    this.executionTabIndicators.set(tabId, { requestIds: new Set([requestId]) });
+    await this.applyExecutionTabIndicator(tabId);
+  }
+
+  private async stopExecutionTabIndicator(tabId: number, requestId: string): Promise<void> {
+    const existing = this.executionTabIndicators.get(tabId);
+    if (!existing) {
+      return;
+    }
+
+    existing.requestIds.delete(requestId);
+    if (existing.requestIds.size > 0) {
+      await this.applyExecutionTabIndicator(tabId);
+      return;
+    }
+
+    this.executionTabIndicators.delete(tabId);
+    await this.clearExecutionTabIndicator(tabId);
+  }
+
+  private async refreshExecutionTabIndicator(tabId: number): Promise<void> {
+    if (!this.executionTabIndicators.has(tabId)) {
+      return;
+    }
+
+    await this.applyExecutionTabIndicator(tabId);
+  }
+
+  private async applyExecutionTabIndicator(tabId: number): Promise<void> {
+    const applyIndicator = browser.scripting
+      .executeScript({
+        target: { tabId },
+        func: applyExecutionTabIndicatorScript,
+        args: [EXECUTION_TITLE_PREFIX],
+      })
+      .catch((error) => {
+        console.info('[WEB_CAP] unable to apply execution tab indicator', {
+          tabId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+
+    const timedOut = await Promise.race([
+      applyIndicator.then(() => false),
+      this.wait(EXECUTION_TAB_INDICATOR_TIMEOUT_MS).then(() => true),
+    ]);
+
+    if (timedOut) {
+      console.info('[WEB_CAP] execution tab indicator apply timed out', {
+        tabId,
+        timeoutMs: EXECUTION_TAB_INDICATOR_TIMEOUT_MS,
+      });
+    }
+  }
+
+  private async clearExecutionTabIndicator(tabId: number): Promise<void> {
+    const clearIndicator = browser.scripting
+      .executeScript({
+        target: { tabId },
+        func: clearExecutionTabIndicatorScript,
+        args: [EXECUTION_TITLE_PREFIX],
+      })
+      .catch((error) => {
+        console.info('[WEB_CAP] unable to clear execution tab indicator', {
+          tabId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+
+    const timedOut = await Promise.race([
+      clearIndicator.then(() => false),
+      this.wait(EXECUTION_TAB_INDICATOR_TIMEOUT_MS).then(() => true),
+    ]);
+
+    if (timedOut) {
+      console.info('[WEB_CAP] execution tab indicator clear timed out', {
+        tabId,
+        timeoutMs: EXECUTION_TAB_INDICATOR_TIMEOUT_MS,
+      });
+    }
+  }
+
+  private async sendTabSnapshot(): Promise<void> {
+    const tabs = await this.getTrackableTabs();
+    if (tabs.length === 0) {
+      return;
+    }
+
+    const authenticatedSites = await this.getAuthenticatedSites();
+    const snapshots = tabs.map((tab) => this.toTabSnapshot(tab));
+    const activeTabId =
+      snapshots.find((tab) => tab.tabId === this.lastActiveTabId)?.tabId ??
+      snapshots.find((tab) => tab.tabId === tabs.find((tab) => tab.active)?.id)?.tabId ??
+      snapshots[0]?.tabId;
+
+    this.send(
+      createRuntimeEnvelope(
+        'tab_snapshot',
+        {
+          activeTabId,
+          tabs: snapshots,
+          authenticatedSites,
+        },
+        { sessionId: this.sessionId },
+      ),
+    );
+  }
+
+  private async getTrackableTabs(): Promise<BrowserTabLike[]> {
+    const tabs = await browser.tabs.query({});
+    return tabs.filter((tab) => typeof tab.id === 'number' && Boolean(tab.url));
+  }
+
+  private async getActiveTab(): Promise<BrowserTabLike | undefined> {
+    const tabs = await browser.tabs.query({
+      active: true,
+      currentWindow: true,
+    });
+
+    return tabs[0];
+  }
+
+  private async getAuthenticatedSites(): Promise<string[]> {
+    const stored = await browser.storage.local.get(AUTHENTICATED_SITES_KEY);
+    return Array.isArray(stored[AUTHENTICATED_SITES_KEY])
+      ? stored[AUTHENTICATED_SITES_KEY]
+      : [];
+  }
+
+  private async storeScriptHistory(
+    entries: ScriptExecutionHistoryEntry[],
+    updatedAt: string,
+  ): Promise<void> {
+    await browser.storage.local.set({
+      [SCRIPT_HISTORY_STORAGE_KEY]: entries,
+      [SCRIPT_HISTORY_UPDATED_AT_STORAGE_KEY]: updatedAt,
+    });
+  }
+
+  private async storeScriptRegistry(
+    scripts: ScriptDefinition[],
+    updatedAt: string,
+  ): Promise<void> {
+    await browser.storage.local.set({
+      [SCRIPT_REGISTRY_STORAGE_KEY]: scripts,
+      [SCRIPT_REGISTRY_UPDATED_AT_STORAGE_KEY]: updatedAt,
+    });
+  }
+
+  private startExecutionObservation(
+    requestId: string,
+    tabId: number,
+    startedUrl: string,
+  ): ExecutionObservation {
+    const observation: ExecutionObservation = {
+      requestId,
+      tabId,
+      startedUrl,
+      createdTabs: new Map(),
+      targetUpdates: [],
+    };
+    this.executionObservations.push(observation);
+    return observation;
+  }
+
+  private cancelExecutionObservation(observation: ExecutionObservation): void {
+    const index = this.executionObservations.indexOf(observation);
+    if (index >= 0) {
+      this.executionObservations.splice(index, 1);
+    }
+  }
+
+  private async finishExecutionObservation(
+    observation: ExecutionObservation,
+    existingEvents: ExecutionEvidenceEvent[],
+  ): Promise<ExecutionEvidenceEvent[]> {
+    this.cancelExecutionObservation(observation);
+    const events: ExecutionEvidenceEvent[] = [];
+
+    for (const tab of observation.createdTabs.values()) {
+      events.push({
+        type: 'page_opened',
+        value: {
+          tab: this.toTabSnapshot(tab),
+          openerTabId: tab.openerTabId ?? observation.tabId,
+          active: Boolean(tab.active),
+        },
+      });
+    }
+
+    const finalTab = await browser.tabs.get(observation.tabId).catch(() => undefined);
+    const finalUrl = finalTab?.url ?? observation.startedUrl;
+    const observedUrl =
+      [...observation.targetUpdates]
+        .reverse()
+        .find((update) => typeof update.url === 'string' && update.url.length > 0)?.url ??
+      finalUrl;
+
+    const hasLoadingUpdate = observation.targetUpdates.some(
+      (update) => update.status === 'loading',
+    );
+    if (observedUrl && observedUrl !== observation.startedUrl) {
+      const hasEquivalentHistoryEvent = [...existingEvents, ...events].some(
+        (event) =>
+          event.type === 'page_url_changed' &&
+          typeof event.value === 'object' &&
+          event.value !== null &&
+          (event.value as { to?: unknown }).to === observedUrl,
+      );
+      if (!hasEquivalentHistoryEvent) {
+        events.push({
+          type: 'page_url_changed',
+          value: {
+            from: observation.startedUrl,
+            to: observedUrl,
+            mode: 'navigation',
+            tabId: observation.tabId,
+          },
+        });
+      }
+    } else if (hasLoadingUpdate) {
+      events.push({
+        type: 'page_reloaded',
+        value: {
+          url: observation.startedUrl,
+          tabId: observation.tabId,
+        },
+      });
+    }
+
+    return events;
+  }
+
+  private recordExecutionTabCreated(tab: BrowserTabLike): void {
+    if (typeof tab.id !== 'number') {
+      return;
+    }
+
+    for (const observation of this.executionObservations) {
+      observation.createdTabs.set(tab.id, tab);
+    }
+  }
+
+  private recordExecutionTabUpdate(
+    tabId: number,
+    changeInfo: { status?: string; url?: string },
+  ): void {
+    for (const observation of this.executionObservations) {
+      if (observation.createdTabs.has(tabId)) {
+        const existing = observation.createdTabs.get(tabId) ?? { id: tabId };
+        observation.createdTabs.set(tabId, {
+          ...existing,
+          url: changeInfo.url ?? existing.url,
+        });
+      }
+
+      if (tabId !== observation.tabId) {
+        continue;
+      }
+
+      observation.targetUpdates.push({
+        tabId,
+        status: changeInfo.status,
+        url: changeInfo.url,
+      });
+    }
+  }
+
+  private createNavigationInterruptedEvidence(startedUrl: string): ExecutionEvidence {
+    return {
+      url: startedUrl,
+      events: [{ type: 'execution_interrupted_by_navigation', value: { url: startedUrl } }],
+      screenshots: [],
+    };
+  }
+
+  private wait(ms: number): Promise<void> {
+    return new Promise((resolve) => {
+      setTimeout(resolve, Math.max(0, ms));
+    });
+  }
+
+  private toTabSnapshot(tab: BrowserTabLike): RuntimeTabSnapshot {
+    const rawUrl = typeof tab.url === 'string' ? tab.url : '';
+    let site = '';
+
+    // Newly created tabs can briefly report an empty or otherwise non-absolute URL
+    // before the browser finishes initializing the navigation target.
+    if (rawUrl.length > 0) {
+      try {
+        site = new URL(rawUrl).hostname.replace(/^www\./, '');
+      } catch {
+        site = '';
+      }
+    }
+
+    return {
+      tabId: tab.id ?? -1,
+      url: rawUrl,
+      title: tab.title ?? '',
+      site,
+      readyState: 'complete',
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  private sendError(
+    requestId: string,
+    code: 'TAB_NOT_FOUND' | 'EXECUTION_FAILED' | 'TIMEOUT',
+    message: string,
+    details?: Record<string, unknown>,
+  ): void {
+    this.send(
+      createRuntimeEnvelope(
+        'error',
+        {
+          code,
+          message,
+          retryable: true,
+          details,
+        },
+        { sessionId: this.sessionId, requestId },
+      ),
+    );
+  }
+
+  private send(envelope: RuntimeEnvelope): void {
+    if (this.socket?.readyState === WebSocket.OPEN) {
+      this.socket.send(JSON.stringify(envelope));
+    }
+  }
+}
+
+function applyExecutionTabIndicatorScript(titlePrefix: string): void {
+  const normalizedPrefix = `${titlePrefix} `;
+  if (!document.title.startsWith(normalizedPrefix)) {
+    document.title = `${normalizedPrefix}${document.title}`;
+  }
+}
+
+function clearExecutionTabIndicatorScript(titlePrefix: string): void {
+  const normalizedPrefix = `${titlePrefix} `;
+  if (document.title.startsWith(normalizedPrefix)) {
+    document.title = document.title.slice(normalizedPrefix.length);
+  }
+}
+
+export default defineBackground(() => {
+  const runtimeClient = new RuntimeClient();
+  runtimeClient.start();
+});

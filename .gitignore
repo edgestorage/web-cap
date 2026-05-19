@@ -1,0 +1,14 @@
+node_modules
+.output
+.wxt
+dist
+artifacts/
+*.log
+.DS_Store
+.idea/
+.spec/indexes/
+.spec/runs/
+.web-cap/
+.generated/
+extension/runtime/injected/script-runtime.generated.ts
+tmp/

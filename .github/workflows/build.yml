@@ -1,0 +1,210 @@
+name: Build
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - v*
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Quality Checks
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test
+        run: pnpm test
+
+  browser-extension:
+    name: Browser Extension Build
+    runs-on: ubuntu-latest
+    needs: quality
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Package Chromium extension
+        run: pnpm zip
+
+      - name: Collect extension artifacts
+        run: |
+          mkdir -p artifacts/extension
+          cp .output/*chrome*.zip artifacts/extension/
+
+      - name: Upload extension artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-cap-extension
+          path: artifacts/extension/*chrome*.zip
+          if-no-files-found: error
+
+      - name: Publish extension release assets
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: .output/*chrome*.zip
+          fail_on_unmatched_files: true
+
+  npm-package:
+    name: npm Package Build
+    runs-on: ubuntu-latest
+    needs: quality
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build npm package
+        run: pnpm build:npm
+
+      - name: Smoke test CLI
+        run: node dist/cli.js --help
+
+      - name: Create package artifact directory
+        run: mkdir -p artifacts/npm
+
+      - name: Pack npm package
+        run: pnpm pack --pack-destination artifacts/npm
+
+      - name: Upload npm artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-package
+          path: |
+            dist/**
+            artifacts/npm/*.tgz
+          if-no-files-found: error
+
+  windows-compat:
+    name: Windows Compatibility
+    runs-on: windows-latest
+    needs: quality
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test daemon, SQLite registry, and CLI paths
+        run: pnpm test tests/web-cap-app.test.ts tests/web-cap-cli.test.ts tests/build-id.test.ts tests/dev-with-script-runtime.test.ts
+
+      - name: Build npm package
+        run: pnpm build:npm
+
+      - name: Smoke test CLI
+        run: node dist/cli.js --help
+
+  npm-publish:
+    name: Publish npm Package
+    runs-on: ubuntu-latest
+    needs: quality
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build npm package
+        run: pnpm build:npm
+
+      - name: Smoke test CLI
+        run: node dist/cli.js --help
+
+      - name: Publish to npm
+        run: npm publish --access=public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

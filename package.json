@@ -1,0 +1,82 @@
+{
+  "name": "web-capability",
+  "version": "0.0.3",
+  "type": "module",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/edgestorage/web-cap.git"
+  },
+  "packageManager": "pnpm@9.15.3",
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "web-cap": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "skills",
+    "LICENSE",
+    "README.md",
+    "README.zh-CN.md",
+    "package.json"
+  ],
+  "scripts": {
+    "dev": "tsx scripts/dev-with-script-runtime.ts",
+    "dev:firefox": "tsx scripts/dev-with-script-runtime.ts -b firefox",
+    "cli": "tsx lib/cli.ts",
+    "generate:script-runtime": "tsx scripts/generate-script-runtime.ts",
+    "generate:build-id": "tsx scripts/generate-build-id.ts",
+    "prepare:wxt": "wxt prepare",
+    "lint": "eslint .",
+    "pretest": "pnpm generate:script-runtime",
+    "prebuild": "pnpm generate:script-runtime && pnpm generate:build-id",
+    "build": "wxt build",
+    "build:npm": "pnpm generate:script-runtime && pnpm generate:build-id && pnpm prepare:wxt && rollup -c",
+    "prebuild:firefox": "pnpm generate:script-runtime && pnpm generate:build-id",
+    "build:firefox": "wxt build -b firefox",
+    "daemon": "tsx lib/runtime-daemon.ts",
+    "daemon:dev": "tsx watch lib/runtime-daemon.ts",
+    "test": "vitest run",
+    "pretypecheck": "pnpm generate:script-runtime && pnpm prepare:wxt",
+    "typecheck": "tsc --noEmit",
+    "prezip": "pnpm generate:script-runtime && pnpm generate:build-id",
+    "zip": "wxt zip",
+    "prezip:firefox": "pnpm generate:script-runtime && pnpm generate:build-id",
+    "zip:firefox": "wxt zip -b firefox",
+    "prepack": "pnpm build:npm"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.17.5",
+    "ajv": "^8.20.0",
+    "better-sqlite3": "^12.10.0",
+    "commander": "^14.0.3",
+    "diff-dom": "^5.2.1",
+    "tinyglobby": "^0.2.16",
+    "vue": "^3.5.22",
+    "ws": "^8.20.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@rollup/plugin-alias": "^6.0.0",
+    "@rollup/plugin-commonjs": "^29.0.2",
+    "@rollup/plugin-json": "^6.1.0",
+    "@rollup/plugin-node-resolve": "^16.0.3",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/cross-spawn": "^6.0.6",
+    "@types/node": "^25.6.0",
+    "@types/ws": "^8.18.1",
+    "@wxt-dev/module-vue": "^1.0.2",
+    "cross-spawn": "^7.0.6",
+    "eslint": "^10.4.0",
+    "rollup": "^4.60.4",
+    "rollup-plugin-esbuild": "^6.2.1",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.59.3",
+    "vitest": "^4.1.5",
+    "wxt": "latest"
+  }
+}

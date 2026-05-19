@@ -1,0 +1,22 @@
+{
+  "extends": "./.wxt/tsconfig.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@shared/*": ["shared/*"]
+    },
+    "types": ["node"]
+  },
+  "include": [
+    "extension",
+    "lib",
+    "scripts",
+    "shared",
+    "types",
+    "tests",
+    "vitest.config.ts",
+    "wxt.config.ts",
+    ".wxt/wxt.d.ts",
+    ".wxt/types/**/*.d.ts"
+  ]
+}
