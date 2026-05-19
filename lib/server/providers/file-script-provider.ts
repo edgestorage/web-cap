@@ -293,9 +293,9 @@ export class FileScriptProvider implements ScriptProvider {
 
   private async removeIndexFiles(): Promise<void> {
     await Promise.all([
-      rm(this.indexPath, { force: true }),
-      rm(`${this.indexPath}-wal`, { force: true }),
-      rm(`${this.indexPath}-shm`, { force: true }),
+      removeFileWithRetries(this.indexPath),
+      removeFileWithRetries(`${this.indexPath}-wal`),
+      removeFileWithRetries(`${this.indexPath}-shm`),
     ]);
   }
 
@@ -393,6 +393,29 @@ export class FileScriptProvider implements ScriptProvider {
     );
   }
 
+}
+
+async function removeFileWithRetries(path: string): Promise<void> {
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    try {
+      await rm(path, { force: true });
+      return;
+    } catch (error) {
+      if (!isRetryableRemoveError(error) || attempt === 29) {
+        throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100 + attempt * 25));
+    }
+  }
+}
+
+function isRetryableRemoveError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error.code === 'EBUSY' || error.code === 'EPERM' || error.code === 'ENOTEMPTY')
+  );
 }
 
 function createSchema(db: Database.Database): void {

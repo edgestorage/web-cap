@@ -54,7 +54,7 @@ describe('WebCapAgentApp', () => {
       connectedClient.close();
     }
     await app.close();
-    await rm(tempDir, { recursive: true, force: true });
+    await removePathWithRetries(tempDir, { recursive: true });
   });
 
   async function connectRuntime(
@@ -1690,78 +1690,28 @@ describe('WebCapAgentApp', () => {
     expect(result.result.title).toBe('Example Form');
   });
 
-  it('default script provider loads builtin scripts and local file registry records together', async () => {
-    const stateDir = join(tempDir, 'state');
-    const provider = createDefaultScriptProvider({
-      WEB_CAP_STATE_DIR: stateDir,
-    });
-    await provider.saveRecord({
-      id: 'persisted.script',
-      scriptDefinition: scriptDefinitionSchema.parse({
+  it(
+    'default script provider loads builtin scripts and local file registry records together',
+    async () => {
+      const stateDir = join(tempDir, 'state');
+      const provider = createDefaultScriptProvider({
+        WEB_CAP_STATE_DIR: stateDir,
+      });
+      await provider.saveRecord({
         id: 'persisted.script',
-        name: 'Persisted Script',
-        version: '1.0.0',
-        status: 'active',
-        type: 'read',
-        summary: 'Persisted script',
-        target: {
-          site: 'generic-web',
-          urlPatterns: ['http://*', 'https://*'],
-          pageHints: [],
-        },
-        tags: ['persisted'],
-        inputSchema: {
-          type: 'object',
-          properties: {},
-          required: [],
-          additionalProperties: false,
-        },
-        outputSchema: {
-          type: 'object',
-          properties: {
-            ok: { type: 'boolean' },
-          },
-          required: ['ok'],
-          additionalProperties: false,
-        },
-        script: {
-          timeoutMs: 1000,
-          code: 'export default async function () { return { ok: true }; }',
-        },
-      }),
-      status: 'active',
-    });
-
-    const builtin = await provider.getById('builtin.page.inspect');
-    const persisted = await provider.getById('persisted.script');
-    const scriptFile = join(stateDir, 'scripts', 'generic-web', 'persisted.script.js');
-    const indexFile = join(stateDir, 'script-registry.sqlite');
-    const scriptSource = await readFile(scriptFile, 'utf8');
-    const searchResults = await provider.search('persisted', { site: 'generic-web' });
-
-    expect(builtin?.id).toBe('builtin.page.inspect');
-    expect(persisted?.id).toBe('persisted.script');
-    expect(scriptSource).toContain('web-cap-script');
-    expect(scriptSource).toContain('"lastExecutedPage": null');
-    expect(await readFile(indexFile)).toBeInstanceOf(Buffer);
-    expect(searchResults.some((result) => result.scriptId === 'persisted.script')).toBe(true);
-
-    await provider.saveRecord(
-      {
-        id: 'url.script',
         scriptDefinition: scriptDefinitionSchema.parse({
-          id: 'url.script',
-          name: 'URL Script',
+          id: 'persisted.script',
+          name: 'Persisted Script',
           version: '1.0.0',
           status: 'active',
           type: 'read',
-          summary: 'URL-backed script',
+          summary: 'Persisted script',
           target: {
             site: 'generic-web',
             urlPatterns: ['http://*', 'https://*'],
             pageHints: [],
           },
-          tags: ['url'],
+          tags: ['persisted'],
           inputSchema: {
             type: 'object',
             properties: {},
@@ -1782,29 +1732,83 @@ describe('WebCapAgentApp', () => {
           },
         }),
         status: 'active',
-      },
-      { lastExecutedPage: 'https://example.com/form' },
-    );
-    const urlScriptSource = await readFile(
-      join(stateDir, 'scripts', 'example.com', 'url.script.js'),
-      'utf8',
-    );
-    const urlScriptSearchResults = await provider.search('url', { site: 'generic-web' });
+      });
 
-    expect(urlScriptSource).toContain('"lastExecutedPage": "https://example.com/form"');
-    expect(urlScriptSource).toContain('"site": "generic-web"');
-    expect(urlScriptSearchResults.some((result) => result.scriptId === 'url.script')).toBe(true);
+      const builtin = await provider.getById('builtin.page.inspect');
+      const persisted = await provider.getById('persisted.script');
+      const scriptFile = join(stateDir, 'scripts', 'generic-web', 'persisted.script.js');
+      const indexFile = join(stateDir, 'script-registry.sqlite');
+      const scriptSource = await readFile(scriptFile, 'utf8');
+      const searchResults = await provider.search('persisted', { site: 'generic-web' });
 
-    await rm(indexFile, { force: true });
-    await rm(`${indexFile}-wal`, { force: true });
-    await rm(`${indexFile}-shm`, { force: true });
-    expect((await provider.getById('persisted.script'))?.id).toBe('persisted.script');
+      expect(builtin?.id).toBe('builtin.page.inspect');
+      expect(persisted?.id).toBe('persisted.script');
+      expect(scriptSource).toContain('web-cap-script');
+      expect(scriptSource).toContain('"lastExecutedPage": null');
+      expect(await readFile(indexFile)).toBeInstanceOf(Buffer);
+      expect(searchResults.some((result) => result.scriptId === 'persisted.script')).toBe(true);
 
-    await rm(`${indexFile}-wal`, { force: true });
-    await rm(`${indexFile}-shm`, { force: true });
-    await writeFile(indexFile, 'not a sqlite index', 'utf8');
-    expect((await provider.getById('persisted.script'))?.id).toBe('persisted.script');
-  });
+      await provider.saveRecord(
+        {
+          id: 'url.script',
+          scriptDefinition: scriptDefinitionSchema.parse({
+            id: 'url.script',
+            name: 'URL Script',
+            version: '1.0.0',
+            status: 'active',
+            type: 'read',
+            summary: 'URL-backed script',
+            target: {
+              site: 'generic-web',
+              urlPatterns: ['http://*', 'https://*'],
+              pageHints: [],
+            },
+            tags: ['url'],
+            inputSchema: {
+              type: 'object',
+              properties: {},
+              required: [],
+              additionalProperties: false,
+            },
+            outputSchema: {
+              type: 'object',
+              properties: {
+                ok: { type: 'boolean' },
+              },
+              required: ['ok'],
+              additionalProperties: false,
+            },
+            script: {
+              timeoutMs: 1000,
+              code: 'export default async function () { return { ok: true }; }',
+            },
+          }),
+          status: 'active',
+        },
+        { lastExecutedPage: 'https://example.com/form' },
+      );
+      const urlScriptSource = await readFile(
+        join(stateDir, 'scripts', 'example.com', 'url.script.js'),
+        'utf8',
+      );
+      const urlScriptSearchResults = await provider.search('url', { site: 'generic-web' });
+
+      expect(urlScriptSource).toContain('"lastExecutedPage": "https://example.com/form"');
+      expect(urlScriptSource).toContain('"site": "generic-web"');
+      expect(urlScriptSearchResults.some((result) => result.scriptId === 'url.script')).toBe(true);
+
+      await removeFileWithRetries(indexFile);
+      await removeFileWithRetries(`${indexFile}-wal`);
+      await removeFileWithRetries(`${indexFile}-shm`);
+      expect((await provider.getById('persisted.script'))?.id).toBe('persisted.script');
+
+      await removeFileWithRetries(`${indexFile}-wal`);
+      await removeFileWithRetries(`${indexFile}-shm`);
+      await writeFile(indexFile, 'not a sqlite index', 'utf8');
+      expect((await provider.getById('persisted.script'))?.id).toBe('persisted.script');
+    },
+    20_000,
+  );
 
   it('defaults state dir to the user home when WEB_CAP_STATE_DIR is unset on POSIX platforms', () => {
     const stateDir = resolveWebCapStateDir({}, 'darwin', '/Users/ada');
@@ -1828,6 +1832,36 @@ describe('WebCapAgentApp', () => {
     expect(stateDir).toBe(join('C:\\Users\\Ada', 'AppData', 'Local', 'web-cap'));
   });
 });
+
+async function removeFileWithRetries(path: string): Promise<void> {
+  await removePathWithRetries(path);
+}
+
+async function removePathWithRetries(
+  path: string,
+  options: { recursive?: boolean } = {},
+): Promise<void> {
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    try {
+      await rm(path, { recursive: options.recursive ?? false, force: true });
+      return;
+    } catch (error) {
+      if (!isRetryableRemoveError(error) || attempt === 29) {
+        throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100 + attempt * 25));
+    }
+  }
+}
+
+function isRetryableRemoveError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error.code === 'EBUSY' || error.code === 'EPERM' || error.code === 'ENOTEMPTY')
+  );
+}
 
 async function waitFor(assertion: () => boolean, timeoutMs = 500): Promise<void> {
   const startedAt = Date.now();
