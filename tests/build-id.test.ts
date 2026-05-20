@@ -41,7 +41,16 @@ describe('build id resolution', () => {
     return {
       projectRoot,
       generatedFilePath: join(projectRoot, '.generated/build-id.json'),
+      packageJsonPath: join(projectRoot, 'package.json'),
     };
+  }
+
+  async function writeFixturePackageJson(projectRoot: string, version = '1.2.3') {
+    await writeFile(
+      join(projectRoot, 'package.json'),
+      `${JSON.stringify({ name: 'web-capability', version }, null, 2)}\n`,
+      'utf8',
+    );
   }
 
   it('prefers an explicit environment build id override', async () => {
@@ -67,9 +76,24 @@ describe('build id resolution', () => {
     expect(await readGeneratedWebCapBuildId(fixture)).toBe(generated);
   });
 
+  it('uses the package version outside tsx runtimes when package metadata is available', async () => {
+    const fixture = await createFixtureProject();
+    await writeFixturePackageJson(fixture.projectRoot, '0.0.3');
+    await writeGeneratedWebCapBuildId(fixture);
+
+    const buildId = await resolveWebCapBuildId({
+      ...fixture,
+      processArgv: ['node', 'dist/cli.js'],
+      processExecArgv: [],
+    });
+
+    expect(buildId).toBe('0.0.3');
+  });
+
   it('keeps dynamic build ids in tsx runtimes by default', async () => {
     const fixture = await createFixtureProject();
     const dynamic = await computeWebCapBuildId(fixture);
+    await writeFixturePackageJson(fixture.projectRoot, '0.0.3');
     await writeGeneratedWebCapBuildId(fixture);
 
     const buildId = await resolveWebCapBuildId({

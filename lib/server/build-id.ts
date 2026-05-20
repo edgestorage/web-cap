@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 const defaultProjectRoot = join(dirname(fileURLToPath(import.meta.url)), '../..');
 const DEFAULT_SOURCE_DIRS = ['lib', 'shared'];
 const DEFAULT_GENERATED_FILE = '.generated/build-id.json';
+const PACKAGE_NAME = 'web-capability';
 
 type BuildIdMode = 'auto' | 'dynamic' | 'generated';
 
@@ -17,6 +18,7 @@ interface BuildIdFile {
 export interface BuildIdOptions {
   env?: NodeJS.ProcessEnv;
   generatedFilePath?: string;
+  packageJsonPath?: string;
   processArgv?: string[];
   processExecArgv?: string[];
   projectRoot?: string;
@@ -55,13 +57,14 @@ export async function resolveWebCapBuildId(options: BuildIdOptions = {}): Promis
     return await computeWebCapBuildId(options);
   }
 
+  const packageVersionBuildId = await readPackageVersionBuildId(options);
   const generatedBuildId = await readGeneratedWebCapBuildId(options);
   if (mode === 'generated') {
-    return generatedBuildId ?? (await computeWebCapBuildId(options));
+    return packageVersionBuildId ?? generatedBuildId ?? (await computeWebCapBuildId(options));
   }
 
-  if (shouldPreferGeneratedBuildId(options) && generatedBuildId) {
-    return generatedBuildId;
+  if (shouldPreferGeneratedBuildId(options)) {
+    return packageVersionBuildId ?? generatedBuildId ?? (await computeWebCapBuildId(options));
   }
 
   return await computeWebCapBuildId(options);
@@ -101,6 +104,33 @@ export async function readGeneratedWebCapBuildId(
   }
 }
 
+export async function readPackageVersionBuildId(
+  options: BuildIdOptions = {},
+): Promise<string | undefined> {
+  const packageJsonPath = await resolvePackageJsonPath(options);
+  if (!packageJsonPath) {
+    return undefined;
+  }
+
+  let raw: string;
+  try {
+    raw = await readFile(packageJsonPath, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return undefined;
+    }
+    throw error;
+  }
+
+  const parsed = JSON.parse(raw) as { name?: unknown; version?: unknown };
+  if (parsed.name !== PACKAGE_NAME || typeof parsed.version !== 'string') {
+    return undefined;
+  }
+
+  const version = parsed.version.trim();
+  return version ? version : undefined;
+}
+
 export function shouldPreferGeneratedBuildId(options: BuildIdOptions = {}): boolean {
   const processArgv = options.processArgv ?? process.argv;
   const processExecArgv = options.processExecArgv ?? process.execArgv;
@@ -122,6 +152,33 @@ function resolveGeneratedFilePath(options: BuildIdOptions): string {
 
   const projectRoot = options.projectRoot ?? defaultProjectRoot;
   return join(projectRoot, DEFAULT_GENERATED_FILE);
+}
+
+async function resolvePackageJsonPath(options: BuildIdOptions): Promise<string | undefined> {
+  if (options.packageJsonPath) {
+    return options.packageJsonPath;
+  }
+
+  const startDirectory = options.projectRoot ?? dirname(fileURLToPath(import.meta.url));
+  let directory = startDirectory;
+
+  while (true) {
+    const packageJsonPath = join(directory, 'package.json');
+    try {
+      await stat(packageJsonPath);
+      return packageJsonPath;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        throw error;
+      }
+    }
+
+    const parent = dirname(directory);
+    if (parent === directory) {
+      return undefined;
+    }
+    directory = parent;
+  }
 }
 
 async function collectTrackedFiles(projectRoot: string, sourceDirs: string[]): Promise<string[]> {
