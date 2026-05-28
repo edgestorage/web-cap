@@ -101,6 +101,7 @@ describe('execution helpers', () => {
     expect(scriptRuntimeSource).toContain('async function runScriptRuntime');
     expect(scriptRuntimeSource).toContain('MutationObserver');
     expect(scriptRuntimeSource).toContain('managed_click');
+    expect(scriptRuntimeSource).toContain('managed_mouse');
     expect(scriptRuntimeSource).toContain('function installManagedClickHook(');
     expect(scriptRuntimeSource).toContain('async waitForManagedInput()');
     expect(scriptRuntimeSource).toContain('function managedMouseDispatch(');
@@ -358,6 +359,89 @@ export default async function (input) {
         result: { echoed: 'HELLO' },
       },
     });
+  });
+
+  it('records Playwright mouse actions as managed action evidence', async () => {
+    const commands: Array<{ method: string; params: Record<string, unknown> }> = [];
+    const bridgeName = '__webCapTestBrowserBridge';
+    (globalThis as typeof globalThis & Record<string, unknown>)[bridgeName] = (
+      payload: Record<string, unknown>,
+    ) => {
+      if (payload.action === 'command') {
+        commands.push({
+          method: String(payload.method),
+          params: payload.params as Record<string, unknown>,
+        });
+      }
+      return {};
+    };
+
+    try {
+      const script = scriptDefinitionSchema.parse({
+        id: 'mouse.click',
+        name: 'Mouse Click',
+        version: '1.0.0',
+        status: 'active',
+        type: 'act',
+        summary: 'Clicks through the Playwright mouse shim.',
+        target: {
+          site: 'generic-web',
+          urlPatterns: ['http://*', 'https://*'],
+          pageHints: [],
+        },
+        tags: ['test'],
+        inputSchema: {
+          type: 'object',
+          properties: {},
+          required: [],
+          additionalProperties: false,
+        },
+        outputSchema: {
+          type: 'object',
+          properties: {
+            ok: { type: 'boolean' },
+          },
+          required: ['ok'],
+          additionalProperties: false,
+        },
+        script: {
+          timeoutMs: 1_000,
+          code: `
+export default async function () {
+  await page.mouse.click(12, 34);
+  return { ok: true };
+}
+          `.trim(),
+        },
+      });
+
+      const expression = buildScriptExecutionExpression(script, {}, [], {
+        managedBrowserBridgeFunctionName: bridgeName,
+      });
+      const response = (await eval(expression)) as {
+        ok: boolean;
+        evidence?: { events: Array<{ type: string; value: Record<string, unknown> }> };
+      };
+
+      expect(response.ok).toBe(true);
+      expect(commands.map((command) => command.method)).toEqual([
+        'Input.dispatchMouseEvent',
+        'Input.dispatchMouseEvent',
+        'Input.dispatchMouseEvent',
+      ]);
+      expect(response.evidence?.events).toContainEqual({
+        type: 'managed_mouse',
+        value: {
+          action: 'up',
+          x: 12,
+          y: 34,
+          buttons: 0,
+          button: 'left',
+        },
+      });
+    } finally {
+      delete (globalThis as typeof globalThis & Record<string, unknown>)[bridgeName];
+    }
   });
 
   it('routes user script setTimeout through the managed timer bridge when provided', async () => {

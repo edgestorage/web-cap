@@ -185,6 +185,9 @@ describe('WEB_CAP CLI', () => {
     expect(stdout).toContain('web-cap script-execute --script <code>');
     expect(stdout).toContain('Runs JavaScript in the selected browser tab.');
     expect(stdout).toContain('use cap.call(...) inside the script');
+    expect(stdout).toContain('Playwright-style page API as global page and cap.page');
+    expect(stdout).toContain("await page.getByRole('button', { name: 'Login' }).click();");
+    expect(stdout).toContain("await page.locator('input[name=email]').fill(input.email);");
     expect(stdout).toContain('--script-file <path>');
     expect(stdout).toContain('--timeout-ms <ms>');
     expect(stdout).not.toContain('--definition-file');
@@ -204,6 +207,10 @@ describe('WEB_CAP CLI', () => {
     expect(stderr).toBe('');
     expect(stdout).toContain('Usage: script-execute [options]');
     expect(stdout).toContain('Run JavaScript in the selected browser tab');
+    expect(stdout).toContain('Playwright-style page/locator helpers');
+    expect(stdout).toContain('Runtime script APIs:');
+    expect(stdout).toContain('page / cap.page');
+    expect(stdout).toContain('page.locator()');
     expect(stdout).not.toContain('inline script code through the local runtime daemon');
     expect(stdout).toContain('--script <code>');
     expect(stdout).toContain('--script-file <path>');
@@ -224,6 +231,8 @@ describe('WEB_CAP CLI', () => {
     expect(stderr).toBe('');
     expect(stdout).toContain('Usage: script-execute [options]');
     expect(stdout).toContain('--script <code>');
+    expect(stdout).toContain('Runtime script APIs:');
+    expect(stdout).toContain('page.locator()');
     expect(stdout).not.toContain('Usage: web-cap <command> [options]');
     expect(stdout).not.toContain('browser-new-tab');
   });

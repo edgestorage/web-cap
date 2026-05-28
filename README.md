@@ -6,6 +6,22 @@ Web Cap is a local-first browser automation toolkit for agents. It lets agents i
 
 Agents interact with Web Cap through the `web-cap` CLI. The CLI manages the required local runtime automatically, so users do not need a separate startup command.
 
+## Quick Use
+
+1. Install the Web Cap skill with the `skills` CLI:
+
+   ```bash
+   npx skills add edgestorage/web-cap
+   ```
+
+2. Install the Web Cap browser extension:
+
+   - Open the latest GitHub Release.
+   - Download the Chrome extension zip asset, named like `*chrome*.zip`.
+   - Open `chrome://extensions` in Chrome.
+   - Enable Developer mode.
+   - Drag the downloaded zip file into the extensions page.
+
 ## Features
 
 - Browser extension runtime for real Chrome/Firefox tabs.
@@ -80,7 +96,7 @@ The browser extension connects to the local runtime and executes commands agains
 - pnpm 9.x
 - A Chromium-based browser or Firefox for extension development
 
-## Quick Start
+## Development Quick Start
 
 Install dependencies:
 
@@ -108,12 +124,6 @@ Run CLI commands from an agent or terminal:
 pnpm cli session-status
 pnpm cli script-search "inspect page" --type read --site generic-web
 pnpm cli script-get builtin.page.inspect
-```
-
-Install the Web Cap agent skill with the `skills` CLI:
-
-```bash
-npx skills add edgestorage/web-cap --skill web-cap -a codex
 ```
 
 A typical agent flow is:

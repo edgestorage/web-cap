@@ -75,6 +75,8 @@ function scriptUsesManagedClick(code: string): boolean {
   }
 
   return (
+    /\bpage\s*\.\s*mouse\b/.test(code) ||
+    /\.\s*dragTo\s*\(/.test(code) ||
     /\.\s*click\s*\(/.test(code) ||
     /new\s+MouseEvent\s*\(/.test(code) ||
     /dispatchEvent\s*\(\s*new\s+MouseEvent/.test(code)

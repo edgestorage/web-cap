@@ -162,6 +162,88 @@ export default async function () {
     expect(scriptRequiresBrowserLevelClick(script, [])).toBe(true);
   });
 
+  it('routes Playwright mouse scripts to debugger', () => {
+    const script = scriptDefinitionSchema.parse({
+      id: 'playwright.mouse',
+      name: 'Playwright Mouse',
+      version: '1.0.0',
+      status: 'active',
+      type: 'act',
+      summary: 'Uses Playwright-style page.mouse.',
+      target: {
+        site: 'generic-web',
+        urlPatterns: ['http://*', 'https://*'],
+        pageHints: [],
+      },
+      tags: ['test'],
+      inputSchema: {
+        type: 'object',
+        properties: {},
+        required: [],
+        additionalProperties: false,
+      },
+      outputSchema: {
+        type: 'object',
+        properties: {},
+        required: [],
+        additionalProperties: true,
+      },
+      script: {
+        timeoutMs: 1_000,
+        code: `
+export default async function () {
+  await page.mouse.move(10, 20);
+  await page.mouse.down();
+  await page.mouse.up();
+  return { ok: true };
+}
+        `.trim(),
+      },
+    });
+
+    expect(scriptRequiresBrowserLevelClick(script, [])).toBe(true);
+  });
+
+  it('routes Playwright drag scripts to debugger', () => {
+    const script = scriptDefinitionSchema.parse({
+      id: 'playwright.drag',
+      name: 'Playwright Drag',
+      version: '1.0.0',
+      status: 'active',
+      type: 'act',
+      summary: 'Uses Playwright-style locator.dragTo.',
+      target: {
+        site: 'generic-web',
+        urlPatterns: ['http://*', 'https://*'],
+        pageHints: [],
+      },
+      tags: ['test'],
+      inputSchema: {
+        type: 'object',
+        properties: {},
+        required: [],
+        additionalProperties: false,
+      },
+      outputSchema: {
+        type: 'object',
+        properties: {},
+        required: [],
+        additionalProperties: true,
+      },
+      script: {
+        timeoutMs: 1_000,
+        code: `
+export default async function () {
+  await page.locator('#source').dragTo(page.locator('#target'));
+  return { ok: true };
+}
+        `.trim(),
+      },
+    });
+
+    expect(scriptRequiresBrowserLevelClick(script, [])).toBe(true);
+  });
+
   it('keeps non-click scripts on the user-script path', () => {
     const script = scriptDefinitionSchema.parse({
       id: 'read.only',

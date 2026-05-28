@@ -45,6 +45,14 @@ interface DebuggerManagedTimerPayload {
   delayMs?: number;
 }
 
+interface DebuggerManagedBrowserPayload {
+  id: string;
+  action?: 'command' | 'waitForEvent';
+  method?: string;
+  params?: Record<string, unknown>;
+  timeoutMs?: number;
+}
+
 interface PointerPosition {
   x: number;
   y: number;
@@ -261,6 +269,47 @@ export class ManagedInputBridgeFactory {
     );
   }
 
+  async createManagedBrowserBridge(
+    target: DebuggeeTarget,
+    scope: ManagedInputBridgeExecutionScope = this.createExecutionScope(),
+  ): Promise<ManagedInputBridge> {
+    const bridgeSuffix = this.createBridgeSuffix(scope, 'browser');
+    const bindingName = `__webCapDebuggerBrowserBinding_${bridgeSuffix}`;
+    const bridgeFunctionName = `__webCapManagedBrowserBridge_${bridgeSuffix}`;
+    const resolverStoreName = `__webCapManagedBrowserResolvers_${bridgeSuffix}`;
+
+    await this.client.sendCommand(target, 'Runtime.addBinding', {
+      name: bindingName,
+    });
+
+    const listener = (
+      source: DebuggeeTarget,
+      method: string,
+      params?: Record<string, unknown>,
+    ) => {
+      if (source.tabId !== target.tabId || method !== 'Runtime.bindingCalled') {
+        return;
+      }
+
+      const event = params as RuntimeBindingCalledEvent | undefined;
+      if (event?.name !== bindingName || !event.payload) {
+        return;
+      }
+
+      void this.handleManagedBrowserBinding(target, resolverStoreName, event.payload);
+    };
+    this.client.getChromeApi()?.debugger?.onEvent?.addListener(listener);
+
+    await this.client.sendCommand(target, 'Runtime.evaluate', {
+      expression: this.buildBrowserBridgeInstaller(bindingName, bridgeFunctionName, resolverStoreName),
+      awaitPromise: true,
+      returnByValue: true,
+      allowUnsafeEvalBlockedByCSP: true,
+    });
+
+    return this.createDisposableBridge(target, listener, bindingName, bridgeFunctionName, resolverStoreName);
+  }
+
   private createDisposableBridge(
     target: DebuggeeTarget,
     listener: (
@@ -435,6 +484,47 @@ export class ManagedInputBridgeFactory {
     this.timerHandles.set(timerKey, timer);
   }
 
+  private async handleManagedBrowserBinding(
+    target: DebuggeeTarget,
+    resolverStoreName: string,
+    payloadJson: string,
+  ): Promise<void> {
+    let payload: DebuggerManagedBrowserPayload | undefined;
+    try {
+      payload = JSON.parse(payloadJson) as DebuggerManagedBrowserPayload;
+    } catch {
+      return;
+    }
+
+    if (!payload?.id || !payload.method) {
+      return;
+    }
+
+    try {
+      const result =
+        payload.action === 'waitForEvent'
+          ? await this.waitForDebuggerEvent(
+              target,
+              String(payload.method),
+              this.readRecord(payload.params) ?? {},
+              Math.max(Number(payload.timeoutMs ?? 5000), 0),
+            )
+          : await this.client.sendCommand(
+              target,
+              String(payload.method),
+              this.readRecord(payload.params) ?? {},
+            );
+      await this.resolveManagedPromise(target, resolverStoreName, payload.id, result);
+    } catch (error) {
+      await this.rejectManagedPromise(
+        target,
+        resolverStoreName,
+        payload.id,
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }
+
   private async dispatchManagedMouse(
     target: DebuggeeTarget,
     payload: DebuggerManagedClickPayload,
@@ -520,6 +610,73 @@ export class ManagedInputBridgeFactory {
       );
     }
     this.pointerPositions.set(target.tabId, { x, y });
+  }
+
+  private async waitForDebuggerEvent(
+    target: DebuggeeTarget,
+    eventMethod: string,
+    matcher: Record<string, unknown>,
+    timeoutMs: number,
+  ): Promise<Record<string, unknown>> {
+    return await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        cleanup();
+        reject(new Error(`Timed out after ${timeoutMs}ms waiting for ${eventMethod}.`));
+      }, timeoutMs);
+      const cleanup = () => {
+        clearTimeout(timeout);
+        this.client.getChromeApi()?.debugger?.onEvent?.removeListener(listener);
+      };
+      const listener = (
+        source: DebuggeeTarget,
+        method: string,
+        params?: Record<string, unknown>,
+      ) => {
+        if (source.tabId !== target.tabId || method !== eventMethod) {
+          return;
+        }
+        if (!this.matchesDebuggerEvent(params ?? {}, matcher)) {
+          return;
+        }
+        cleanup();
+        resolve(params ?? {});
+      };
+      this.client.getChromeApi()?.debugger?.onEvent?.addListener(listener);
+    });
+  }
+
+  private matchesDebuggerEvent(
+    params: Record<string, unknown>,
+    matcher: Record<string, unknown>,
+  ): boolean {
+    const url = this.readEventUrl(params);
+    const expectedUrl = typeof matcher.url === 'string' ? matcher.url : '';
+    if (expectedUrl && url !== expectedUrl) {
+      return false;
+    }
+    const regexSource = typeof matcher.regexSource === 'string' ? matcher.regexSource : '';
+    if (regexSource) {
+      const regex = new RegExp(
+        regexSource,
+        typeof matcher.regexFlags === 'string' ? matcher.regexFlags : '',
+      );
+      if (!regex.test(url)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private readEventUrl(params: Record<string, unknown>): string {
+    const request = this.readRecord(params.request);
+    if (typeof request?.url === 'string') {
+      return request.url;
+    }
+    const response = this.readRecord(params.response);
+    if (typeof response?.url === 'string') {
+      return response.url;
+    }
+    return typeof params.url === 'string' ? params.url : '';
   }
 
   private async sendMouseEvent(
@@ -725,6 +882,7 @@ export class ManagedInputBridgeFactory {
     target: DebuggeeTarget,
     resolverStoreName: string,
     id: string,
+    value?: unknown,
   ): Promise<void> {
     await this.client.sendCommand(target, 'Runtime.evaluate', {
       expression: `
@@ -735,7 +893,7 @@ export class ManagedInputBridgeFactory {
     return;
   }
   delete store[${JSON.stringify(id)}];
-  entry.resolve();
+  entry.resolve(${JSON.stringify(value ?? null)});
 })();
       `,
       awaitPromise: true,
@@ -1047,6 +1205,45 @@ export class ManagedInputBridgeFactory {
         id,
         action: payload?.action === 'clear' ? 'clear' : 'schedule',
         delayMs: Number(payload?.delayMs ?? 0),
+      }));
+    });
+  };
+})();
+    `;
+  }
+
+  private buildBrowserBridgeInstaller(
+    bindingName: string,
+    bridgeFunctionName: string,
+    resolverStoreName: string,
+  ): string {
+    return `
+(() => {
+  const bindingName = ${JSON.stringify(bindingName)};
+  const bridgeFunctionName = ${JSON.stringify(bridgeFunctionName)};
+  const resolverStoreName = ${JSON.stringify(resolverStoreName)};
+  const binding = globalThis[bindingName];
+  if (typeof binding !== 'function') {
+    throw new Error(\`Debugger binding \${bindingName} was not installed.\`);
+  }
+
+  globalThis[resolverStoreName] = Object.create(null);
+  globalThis[bridgeFunctionName] = (payload) => {
+    const id =
+      typeof payload?.id === 'string' && payload.id.length > 0
+        ? payload.id
+        : \`\${Date.now()}-\${Math.random().toString(16).slice(2)}\`;
+    return new Promise((resolve, reject) => {
+      globalThis[resolverStoreName][id] = { resolve, reject };
+      binding(JSON.stringify({
+        id,
+        action: payload?.action === 'waitForEvent' ? 'waitForEvent' : 'command',
+        method: typeof payload?.method === 'string' ? payload.method : '',
+        params:
+          payload && typeof payload.params === 'object' && payload.params !== null
+            ? payload.params
+            : {},
+        timeoutMs: Number(payload?.timeoutMs ?? 0),
       }));
     });
   };

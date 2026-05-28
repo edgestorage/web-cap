@@ -1,5 +1,7 @@
 /* eslint-disable */
 // Mechanically extracted from execution-helpers.ts. Keep behavior changes out of this file.
+import { createPlaywrightPageApi } from './playwright-shim.injected';
+import type { ScriptPlaywrightPage } from './playwright-shim-types.injected';
 import { installManagedClickHook } from './managed-click.injected';
 import { captureVisibleElementsDiff } from './visible-elements.injected';
 
@@ -72,12 +74,14 @@ type RuntimeApi = {
   get(scriptId: string): RuntimeJsonObject;
   list(): RuntimeJsonObject[];
   call(scriptId: string, nestedInput?: RuntimeJsonObject): Promise<RuntimeJsonObject>;
+  page: ScriptPlaywrightPage;
   typeIntoElement(element: unknown, value: unknown): Promise<void>;
   waitForManagedInput(): Promise<void>;
 };
 
 type ManagedKeyboardBridge = (payload: RuntimeJsonObject) => unknown;
 type ManagedWindowBridge = (payload: RuntimeJsonObject) => unknown;
+type ManagedBrowserBridge = (payload: RuntimeJsonObject) => unknown;
 
 export interface ScriptRuntimeArgs {
   scriptDefinition: RuntimeScript;
@@ -86,6 +90,7 @@ export interface ScriptRuntimeArgs {
   managedClickBridgeFunctionName: string | null;
   managedKeyboardBridgeFunctionName: string | null;
   managedWindowBridgeFunctionName: string | null;
+  managedBrowserBridgeFunctionName: string | null;
   scriptFactories: Record<string, (input: RuntimeJsonObject) => unknown>;
 }
 
@@ -96,6 +101,7 @@ export async function runScriptRuntime({
   managedClickBridgeFunctionName,
   managedKeyboardBridgeFunctionName,
   managedWindowBridgeFunctionName,
+  managedBrowserBridgeFunctionName,
   scriptFactories,
 }: ScriptRuntimeArgs) {
   function validateScalarField(
@@ -199,10 +205,10 @@ export async function runScriptRuntime({
   const POST_ACTION_VISIBLE_DIFF_DELAY_MS = 200;
   const MAX_SCROLL_TARGETS = 200;
 
-  function hasManagedClickEventSince(eventStartIndex: number) {
+  function hasPostActionEventSince(eventStartIndex: number) {
     return context.evidence.events
       .slice(eventStartIndex)
-      .some((event) => event.type === 'managed_click');
+      .some((event) => event.type === 'managed_click' || event.type === 'managed_mouse');
   }
 
   function toSchemaSummary(item: RuntimeScript): RuntimeJsonObject {
@@ -443,6 +449,10 @@ export async function runScriptRuntime({
     return getRuntimeBridge<ManagedWindowBridge>(managedWindowBridgeFunctionName);
   }
 
+  function getManagedBrowserBridge(): ManagedBrowserBridge | null {
+    return getRuntimeBridge<ManagedBrowserBridge>(managedBrowserBridgeFunctionName);
+  }
+
   function isEditableElement(element: unknown) {
     const hasInputClass = typeof HTMLInputElement !== 'undefined';
     const hasTextareaClass = typeof HTMLTextAreaElement !== 'undefined';
@@ -650,7 +660,7 @@ export async function runScriptRuntime({
     };
   }
 
-  function createApi(): RuntimeApi {
+  function createApi(page: ScriptPlaywrightPage): RuntimeApi {
     return {
       get(scriptId: string) {
         const nested = context.registry.get(scriptId);
@@ -665,6 +675,7 @@ export async function runScriptRuntime({
       async call(scriptId: string, nestedInput: RuntimeJsonObject = {}) {
         return await executeScriptById(scriptId, nestedInput, true);
       },
+      page,
       async typeIntoElement(element: unknown, value: unknown) {
         await typeIntoElement(element, value);
       },
@@ -685,7 +696,33 @@ export async function runScriptRuntime({
       );
     }
 
-    const cap = createApi();
+    const page = createPlaywrightPageApi({
+      wait,
+      typeIntoElement,
+      isEditableElement,
+      useDomKeyboardFallback: () => !getManagedKeyboardBridge(),
+      browserCommand: async (method, params = {}) => {
+        const bridgeFunction = getManagedBrowserBridge();
+        if (!bridgeFunction) {
+          throw new Error('Browser-level Playwright API requires the debugger CDP bridge.');
+        }
+        return await Promise.resolve(bridgeFunction({ action: 'command', method, params }));
+      },
+      browserEvent: async (method, params = {}, timeoutMs) => {
+        const bridgeFunction = getManagedBrowserBridge();
+        if (!bridgeFunction) {
+          throw new Error('Browser-level Playwright API requires the debugger CDP bridge.');
+        }
+        return await Promise.resolve(bridgeFunction({ action: 'waitForEvent', method, params, timeoutMs }));
+      },
+      recordEvidenceEvent: (type, value) => {
+        context.evidence.events.push({ type, value });
+      },
+      waitForManagedInput: async () => {
+        await context.pendingAsyncOperations;
+      },
+    });
+    const cap = createApi(page);
     const scriptFunction = scriptFactories[item.id];
     if (typeof scriptFunction !== 'function') {
       throw new Error(
@@ -693,9 +730,11 @@ export async function runScriptRuntime({
       );
     }
 
-    const runtimeGlobal = globalThis as typeof globalThis & { cap?: RuntimeApi };
+    const runtimeGlobal = globalThis as typeof globalThis & { cap?: RuntimeApi; page?: ScriptPlaywrightPage };
     const previousCap = runtimeGlobal.cap;
+    const previousPage = runtimeGlobal.page;
     runtimeGlobal.cap = cap;
+    runtimeGlobal.page = page;
     const visibleElementsStartedAt = Date.now();
     const beforeSnapshotStartedAt = Date.now();
     const beforeVisibleElements = context.visibleElementsTracker.snapshot();
@@ -716,10 +755,15 @@ export async function runScriptRuntime({
       } else {
         runtimeGlobal.cap = previousCap;
       }
+      if (previousPage === undefined) {
+        delete runtimeGlobal.page;
+      } else {
+        runtimeGlobal.page = previousPage;
+      }
     }
 
     let postActionDelayMs = 0;
-    if (typeof document !== 'undefined' && hasManagedClickEventSince(scriptEventStartIndex)) {
+    if (typeof document !== 'undefined' && hasPostActionEventSince(scriptEventStartIndex)) {
       const postActionDelayStartedAt = Date.now();
       await wait(POST_ACTION_VISIBLE_DIFF_DELAY_MS);
       postActionDelayMs = Date.now() - postActionDelayStartedAt;
