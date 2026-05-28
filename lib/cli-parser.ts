@@ -319,6 +319,9 @@ function scriptExecutionHelp(): string {
   return one JSON object, and can use cap.call(...) inside the script to call
   reusable capabilities.
 
+  Scripts also receive a Playwright-style page API as global page and cap.page.
+${scriptRuntimeApiHelp('  ')}
+
   --script <code>       Script source code to run in the browser tab.
   --script-file <path>  Read script source code from a file.
   --input <json>        JSON object passed to the script. Defaults to {}.
@@ -327,6 +330,15 @@ function scriptExecutionHelp(): string {
   --timeout-ms <ms>     Execution timeout in milliseconds.
   --register            Save the script for reuse only if it returns ok: true.
 `;
+}
+
+function scriptRuntimeApiHelp(indent = ''): string {
+  return `${indent}Use page.locator(...) and locator actions such as click(), fill(), count(),
+${indent}textContent(), first(), nth(), waitFor(), and getByRole()/getByText().
+
+${indent}Example:
+${indent}  await page.getByRole('button', { name: 'Login' }).click();
+${indent}  await page.locator('input[name=email]').fill(input.email);`;
 }
 
 function createCommandParser(commandName: CliCommandName): Command {
@@ -412,7 +424,7 @@ function createScriptGetParser(): Command {
 function createScriptExecuteParser(): Command {
   return createParser('script-execute')
     .description(
-      'Run JavaScript in the selected browser tab with JSON input and observable page evidence.',
+      'Run JavaScript in the selected browser tab with JSON input, observable page evidence, and Playwright-style page/locator helpers.',
     )
     .option('--script <code>', 'Script source code to run in the browser tab.')
     .option('--script-file <path>', 'Read script source code from a file.')
@@ -446,7 +458,11 @@ function createWaitEventsParser(): Command {
 }
 
 function helpForCommand(command: Command): CliCommand {
-  return { name: 'help', text: command.helpInformation() };
+  const runtimeHelp =
+    command.name() === 'script-execute'
+      ? `\nRuntime script APIs:\n  page / cap.page  Playwright-style Page helper for the current tab.\n  page.locator()   Create a Playwright-style Locator helper.\n${scriptRuntimeApiHelp('  ')}\n`
+      : '';
+  return { name: 'help', text: `${command.helpInformation()}${runtimeHelp}` };
 }
 
 function createParser(name: string): Command {

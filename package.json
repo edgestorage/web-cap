@@ -71,6 +71,7 @@
     "@wxt-dev/module-vue": "^1.0.2",
     "cross-spawn": "^7.0.6",
     "eslint": "^10.4.0",
+    "playwright-core": "1.60.0",
     "rollup": "^4.60.4",
     "rollup-plugin-esbuild": "^6.2.1",
     "tsx": "^4.21.0",

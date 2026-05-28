@@ -8,6 +8,10 @@ const currentDir = dirname(fileURLToPath(import.meta.url));
 const runtimeSourcePaths = [
   resolve(currentDir, '../extension/runtime/injected/visible-elements.injected.ts'),
   resolve(currentDir, '../extension/runtime/injected/managed-click.injected.ts'),
+  resolve(currentDir, '../extension/runtime/injected/playwright-shim-types.injected.ts'),
+  resolve(currentDir, '../extension/runtime/injected/playwright-shim-helpers.injected.ts'),
+  resolve(currentDir, '../extension/runtime/injected/playwright-locator.injected.ts'),
+  resolve(currentDir, '../extension/runtime/injected/playwright-shim.injected.ts'),
   resolve(currentDir, '../extension/runtime/injected/script-runtime.injected.ts'),
 ];
 const generatedPath = resolve(currentDir, '../extension/runtime/injected/script-runtime.generated.ts');
@@ -33,7 +37,9 @@ function transpileRuntimeModule(source: string): string {
   return transpiled.outputText
     .replace(/^\s*import\s+.+?;\s*$/gm, '')
     .replace(/^export\s+(async\s+function\s+runScriptRuntime)/m, '$1')
+    .replace(/^export\s+(async\s+function\s+)/gm, '$1')
     .replace(/^export\s+(function\s+)/gm, '$1')
+    .replace(/^\s*export\s+\{\};\s*$/gm, '')
     .trim();
 }
 

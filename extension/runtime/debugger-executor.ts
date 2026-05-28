@@ -51,6 +51,8 @@ export class DebuggerScriptExecutor {
         await this.managedInputBridgeFactory.createManagedKeyboardBridge(target, executionScope);
       const windowBridge =
         await this.managedInputBridgeFactory.createManagedWindowBridge(target, executionScope);
+      const browserBridge =
+        await this.managedInputBridgeFactory.createManagedBrowserBridge(target, executionScope);
       let evaluation: DebuggerEvaluateResult;
       try {
         evaluation = await this.client.sendCommand<DebuggerEvaluateResult>(target, 'Runtime.evaluate', {
@@ -59,6 +61,7 @@ export class DebuggerScriptExecutor {
             managedKeyboardBridgeFunctionName: keyboardBridge.bridgeFunctionName,
             managedWindowBridgeFunctionName: windowBridge.bridgeFunctionName,
             managedTimerBridgeFunctionName: timerBridge.bridgeFunctionName,
+            managedBrowserBridgeFunctionName: browserBridge.bridgeFunctionName,
           }),
           awaitPromise: true,
           returnByValue: true,
@@ -66,6 +69,7 @@ export class DebuggerScriptExecutor {
           allowUnsafeEvalBlockedByCSP: true,
         });
       } finally {
+        await browserBridge.dispose();
         await timerBridge.dispose();
         await windowBridge.dispose();
         await keyboardBridge.dispose();

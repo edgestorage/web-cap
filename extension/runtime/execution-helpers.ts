@@ -16,6 +16,7 @@ export interface ScriptExecutionExpressionOptions {
   managedKeyboardBridgeFunctionName?: string;
   managedWindowBridgeFunctionName?: string;
   managedTimerBridgeFunctionName?: string;
+  managedBrowserBridgeFunctionName?: string;
 }
 
 export function scriptToFunctionExpression(code: string): string {
@@ -323,6 +324,10 @@ export function buildScriptExecutionExpression(
     options.managedTimerBridgeFunctionName === undefined
       ? null
       : String(options.managedTimerBridgeFunctionName);
+  const managedBrowserBridgeFunctionName =
+    options.managedBrowserBridgeFunctionName === undefined
+      ? null
+      : String(options.managedBrowserBridgeFunctionName);
   const scripts = new Map<string, ScriptDefinition>();
   for (const item of scriptRegistry) {
     scripts.set(item.id, item);
@@ -345,6 +350,7 @@ export function buildScriptExecutionExpression(
   const managedKeyboardBridgeFunctionName = ${JSON.stringify(managedKeyboardBridgeFunctionName)};
   const managedWindowBridgeFunctionName = ${JSON.stringify(managedWindowBridgeFunctionName)};
   const managedTimerBridgeFunctionName = ${JSON.stringify(managedTimerBridgeFunctionName)};
+  const managedBrowserBridgeFunctionName = ${JSON.stringify(managedBrowserBridgeFunctionName)};
   const timerBridge = managedTimerBridgeFunctionName ? globalThis[managedTimerBridgeFunctionName] : null;
   const nativeSetTimeout = globalThis.setTimeout.bind(globalThis);
   const nativeClearTimeout = globalThis.clearTimeout.bind(globalThis);
@@ -400,6 +406,7 @@ export function buildScriptExecutionExpression(
     managedKeyboardBridgeFunctionName,
     managedWindowBridgeFunctionName,
     managedTimerBridgeFunctionName,
+    managedBrowserBridgeFunctionName,
     scriptFactories,
   });
 })()
