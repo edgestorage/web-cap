@@ -54,7 +54,7 @@ That means an agent does not only get a script's declared JSON result. It can al
 
 - Page targeting: script definitions include target sites, URL patterns, page hints, tags, type, status, and version, so agents can search for the right capability and avoid running a script on the wrong page.
 - Two script types: `read` scripts inspect or extract page state, while `act` scripts operate on the page or trigger browser-side changes.
-- Event streaming: `wait-events` streams browser page events as JSON Lines, which gives agents a lightweight way to watch clicks, input/change/submit activity, URL changes, and loading state.
+- User handoff observation: `wait-events` waits while a user completes a browser action, then streams the resulting interaction path as JSON Lines. Use it when an agent has reached a step that requires user action and needs the observed clicks, input/change/submit activity, URL changes, or loading state to infer what the user did next.
 - Local execution history: inline scripts are tracked locally with status and result metadata. Temporary script ids remain callable while they are in the latest local history entries.
 - Success-gated registration: `--register` only persists a script when its execution result includes `ok: true`, which helps keep the reusable script registry clean.
 - Tab-aware execution: commands can target a specific `--tab-id`, while default execution follows the active connected browser tab.
@@ -155,7 +155,7 @@ Register a reusable script definition with metadata, input JSON schema, output J
 
 ### Browser commands
 
-Web Cap also includes commands such as `browser-new-tab`, `session-status`, and `wait-events` for agent workflows that need tab control or browser event observation.
+Web Cap also includes commands such as `browser-new-tab`, `session-status`, and `wait-events` for agent workflows that need tab control, or need to wait for a user to complete a browser step and inspect the resulting action path.
 
 ## Script Model
 

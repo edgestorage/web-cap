@@ -452,9 +452,9 @@ function createBrowserNewTabParser(): Command {
 
 function createWaitEventsParser(): Command {
   return createParser('wait-events')
-    .description('Stream page events from the connected browser as JSON Lines.')
-    .option('--duration-ms <ms>', 'Event monitoring duration in milliseconds.', parseIntegerOption)
-    .option('--tab-id <id>', 'Browser tab id to observe.', parseIntegerOption);
+    .description('Wait while the user completes a browser action and stream the resulting interaction path as JSON Lines.')
+    .option('--duration-ms <ms>', 'How long to wait for the user to complete the browser action, in milliseconds.', parseIntegerOption)
+    .option('--tab-id <id>', 'Browser tab id where the user action path should be observed.', parseIntegerOption);
 }
 
 function helpForCommand(command: Command): CliCommand {

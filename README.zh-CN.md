@@ -54,7 +54,7 @@ Web Cap 会围绕脚本执行观察页面。它会在脚本运行前记录可见
 
 - 页面目标约束：脚本定义包含目标站点、URL patterns、page hints、tags、type、status 和 version，agent 可以搜索合适能力，也能避免把脚本跑到错误页面上。
 - 两种脚本类型：`read` 脚本用于检查或提取页面状态，`act` 脚本用于操作页面或触发浏览器侧变化。
-- 事件流：`wait-events` 会以 JSON Lines 形式流式输出浏览器页面事件，让 agent 轻量观察点击、input/change/submit、URL 变化和加载状态。
+- 用户接手观察：`wait-events` 会在用户完成浏览器操作期间等待，并以 JSON Lines 形式流式输出这段操作路径。仅在 agent 遇到必须由用户操作的步骤，并需要根据点击、input/change/submit、URL 变化或加载状态判断用户后续操作路径时使用。
 - 本地执行历史：inline scripts 会在本地记录状态和结果元数据。临时脚本 id 在仍位于最近本地历史记录中时可以继续被调用。
 - 成功门槛注册：`--register` 只有在脚本执行结果包含 `ok: true` 时才会持久化脚本，有助于保持可复用脚本注册表干净。
 - 标签页感知执行：命令可以通过 `--tab-id` 指定目标标签页；默认执行会使用当前连接浏览器的 active tab。
@@ -155,7 +155,7 @@ pnpm cli script-get builtin.page.inspect
 
 ### 浏览器命令
 
-Web Cap 还包括 `browser-new-tab`、`session-status`、`wait-events` 等命令，适合需要标签页控制或浏览器事件观察的 agent 工作流。
+Web Cap 还包括 `browser-new-tab`、`session-status`、`wait-events` 等命令，适合需要标签页控制，或需要等待用户完成浏览器步骤并检查其操作路径的 agent 工作流。
 
 ## 脚本模型
 
