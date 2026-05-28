@@ -130,9 +130,9 @@ describe('WEB_CAP CLI', () => {
 
   it('parses MCP-equivalent utility commands', () => {
     expect(parseCliArgs(['mcp'])).toEqual({ name: 'mcp' });
-    expect(parseCliArgs(['session-status', '--compact'])).toEqual({
+    expect(parseCliArgs(['session-status', '--pretty'])).toEqual({
       name: 'session-status',
-      options: { compact: true },
+      options: { pretty: true },
     });
     expect(parseCliArgs(['script-search', 'inspect page', '--type', 'act', '--site', 'docs'])).toEqual({
       name: 'script-search',
@@ -162,6 +162,26 @@ describe('WEB_CAP CLI', () => {
         action: 'set',
         key: 'activateTabOnScriptExecute',
         value: true,
+      },
+    });
+    expect(parseCliArgs(['config', 'set', 'evidence', 'events,visibleElements'])).toEqual({
+      name: 'config',
+      options: {
+        action: 'set',
+        key: 'evidence',
+        value: ['events', 'visibleElements'],
+      },
+    });
+    expect(parseCliArgs(['config', 'set', 'evidence', 'all'])).toMatchObject({
+      options: {
+        key: 'evidence',
+        value: ['all'],
+      },
+    });
+    expect(parseCliArgs(['config', 'set', 'evidence', 'common'])).toMatchObject({
+      options: {
+        key: 'evidence',
+        value: ['common'],
       },
     });
   });
@@ -332,11 +352,11 @@ describe('WEB_CAP CLI', () => {
     });
 
     const runs = [
-      ['session-status', '--compact'],
-      ['script-search', 'inspect', '--type', 'act', '--site', 'generic-web', '--compact'],
-      ['script-get', 'builtin.page.inspect', '--version', '1.0.0', '--compact'],
-      ['script-register', '--definition', '{"id":"local.test"}', '--compact'],
-      ['browser-new-tab', '--url', 'https://example.com', '--active', 'true', '--compact'],
+      ['session-status'],
+      ['script-search', 'inspect', '--type', 'act', '--site', 'generic-web'],
+      ['script-get', 'builtin.page.inspect', '--version', '1.0.0'],
+      ['script-register', '--definition', '{"id":"local.test"}'],
+      ['browser-new-tab', '--url', 'https://example.com', '--active', 'true'],
     ];
 
     for (const argv of runs) {
@@ -363,6 +383,47 @@ describe('WEB_CAP CLI', () => {
       'scriptRegister:local.test',
       'browserNewTab:https://example.com:true',
     ]);
+  });
+
+  it('prints compact JSON by default and formatted JSON with --pretty', async () => {
+    const service = createService({
+      sessionStatus() {
+        return {
+          connected: false,
+          tabs: [],
+          authenticatedSites: [],
+        };
+      },
+    });
+
+    let stdout = '';
+    let stderr = '';
+    const compactCode = await runCli(
+      ['session-status'],
+      {
+        stdout: { write: (chunk: string) => { stdout += chunk; return true; } },
+        stderr: { write: (chunk: string) => { stderr += chunk; return true; } },
+      },
+      async () => service,
+    );
+
+    expect(compactCode).toBe(0);
+    expect(stderr).toBe('');
+    expect(stdout.trim()).toBe(JSON.stringify(JSON.parse(stdout)));
+
+    stdout = '';
+    const prettyCode = await runCli(
+      ['session-status', '--pretty'],
+      {
+        stdout: { write: (chunk: string) => { stdout += chunk; return true; } },
+        stderr: { write: (chunk: string) => { stderr += chunk; return true; } },
+      },
+      async () => service,
+    );
+
+    expect(prettyCode).toBe(0);
+    expect(stderr).toBe('');
+    expect(stdout).toContain('\n  "connected": false');
   });
 
   it('runs the stdio MCP adapter as a CLI command', async () => {
@@ -406,8 +467,6 @@ describe('WEB_CAP CLI', () => {
         calls.push(request);
         return {
           scriptId: 'temp.script.000001',
-          localScriptId: 'temp.script.000001',
-          scriptType: 'act',
           status: 'succeeded',
           result: { ok: true },
           evidence: { events: [], screenshots: [] },
@@ -455,7 +514,6 @@ describe('WEB_CAP CLI', () => {
         'export default async function () { return { ok: true }; }',
         '--input',
         '{"x":1}',
-        '--compact',
       ],
       {
         stdout: { write: (chunk: string) => { stdout += chunk; return true; } },
@@ -470,12 +528,17 @@ describe('WEB_CAP CLI', () => {
       {
         script: 'export default async function () { return { ok: true }; }',
         input: { x: 1 },
+        options: {
+          tabId: 1,
+          evidence: ['common'],
+        },
       },
     ]);
     expect(JSON.parse(stdout)).toMatchObject({
       status: 'succeeded',
       result: { ok: true },
     });
+    expect(stdout.trim()).toBe(JSON.stringify(JSON.parse(stdout)));
   });
 
   it('persists config and applies activateTab to script execution', async () => {
@@ -487,8 +550,6 @@ describe('WEB_CAP CLI', () => {
         calls.push(request);
         return {
           scriptId: 'temp.script.000001',
-          localScriptId: 'temp.script.000001',
-          scriptType: 'act',
           status: 'succeeded',
           result: { ok: true },
           evidence: { events: [], screenshots: [] },
@@ -508,7 +569,7 @@ describe('WEB_CAP CLI', () => {
     let stderr = '';
 
     const setCode = await runCli(
-      ['config', 'set', 'activateTabOnScriptExecute', 'true', '--compact'],
+      ['config', 'set', 'activateTabOnScriptExecute', 'true'],
       {
         stdout: { write: (chunk: string) => { stdout += chunk; return true; } },
         stderr: { write: (chunk: string) => { stderr += chunk; return true; } },
@@ -527,12 +588,34 @@ describe('WEB_CAP CLI', () => {
     });
 
     stdout = '';
+    const setEvidenceCode = await runCli(
+      ['config', 'set', 'evidence', 'events,visibleElements'],
+      {
+        stdout: { write: (chunk: string) => { stdout += chunk; return true; } },
+        stderr: { write: (chunk: string) => { stderr += chunk; return true; } },
+      },
+      async () => {
+        throw new Error('config should not connect to daemon');
+      },
+    );
+
+    expect(setEvidenceCode).toBe(0);
+    expect(stderr).toBe('');
+    expect(JSON.parse(stdout)).toMatchObject({
+      key: 'evidence',
+      value: ['events', 'visibleElements'],
+      config: {
+        activateTabOnScriptExecute: true,
+        evidence: ['events', 'visibleElements'],
+      },
+    });
+
+    stdout = '';
     const executeCode = await runCli(
       [
         'script-execute',
         '--script',
         'export default async function () { return { ok: true }; }',
-        '--compact',
       ],
       {
         stdout: { write: (chunk: string) => { stdout += chunk; return true; } },
@@ -549,6 +632,7 @@ describe('WEB_CAP CLI', () => {
         input: {},
         options: {
           activateTab: true,
+          evidence: ['events', 'visibleElements'],
         },
       },
     ]);

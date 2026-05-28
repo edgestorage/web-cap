@@ -106,19 +106,19 @@ async function handleConfigCommand(
   if (options.action === 'get') {
     return {
       key: options.key,
-      value: current[options.key] ?? false,
+      value: readDefaultedConfigValue(current, options.key),
       config: current,
     };
   }
 
   const next: WebCapConfig = {
     ...current,
-    [options.key]: options.value ?? false,
+    [options.key]: options.value ?? readDefaultConfigValue(options.key),
   };
   const saved = await saveWebCapConfig(next);
   return {
     key: options.key,
-    value: saved[options.key] ?? false,
+    value: readDefaultedConfigValue(saved, options.key),
     config: saved,
   };
 }
@@ -127,14 +127,32 @@ async function applyConfiguredScriptExecutionOptions(
   request: ExecuteScriptRequest,
 ): Promise<void> {
   const config = await loadWebCapConfig();
-  if (config.activateTabOnScriptExecute !== true) {
-    return;
+  const evidence = config.evidence ?? ['common'];
+
+  if (config.activateTabOnScriptExecute === true) {
+    request.options = {
+      ...request.options,
+      activateTab: true,
+    };
   }
 
-  request.options = {
-    ...request.options,
-    activateTab: true,
-  };
+  if (evidence.length > 0) {
+    request.options = {
+      ...request.options,
+      evidence,
+    };
+  }
+}
+
+function readDefaultedConfigValue(
+  config: WebCapConfig,
+  key: keyof WebCapConfig,
+): boolean | string[] {
+  return config[key] ?? readDefaultConfigValue(key);
+}
+
+function readDefaultConfigValue(key: keyof WebCapConfig): boolean | string[] {
+  return key === 'evidence' ? ['common'] : false;
 }
 
 function coreToolNameForCommand(command: CliCommand): CoreToolName | undefined {
@@ -212,7 +230,7 @@ function formatCliError(error: unknown): string {
 }
 
 function writeJson(io: CliIo, value: unknown, options: JsonOutputCliOptions): void {
-  io.stdout.write(`${JSON.stringify(value, null, options.compact ? 0 : 2)}\n`);
+  io.stdout.write(`${JSON.stringify(value, null, options.pretty ? 2 : 0)}\n`);
 }
 
 if (isDirectEntryPoint(import.meta.url, process.argv[1])) {

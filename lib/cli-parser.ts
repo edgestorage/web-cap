@@ -3,7 +3,7 @@ import { Command, InvalidArgumentError, Option } from 'commander';
 import type { ExecuteScriptRequest } from './server/agent/contracts';
 import type { ScriptSearchFilters } from '@shared/script-schema';
 import { formatError } from './daemon-bootstrap';
-import type { WebCapConfigKey } from './config';
+import type { WebCapConfigKey, WebCapEvidenceConfig } from './config';
 
 export interface ScriptExecuteCliOptions {
   script?: string;
@@ -13,11 +13,11 @@ export interface ScriptExecuteCliOptions {
   tabId?: number;
   timeoutMs?: number;
   register?: boolean;
-  compact?: boolean;
+  pretty?: boolean;
 }
 
 export interface JsonOutputCliOptions {
-  compact?: boolean;
+  pretty?: boolean;
 }
 
 export interface ScriptSearchCliOptions extends JsonOutputCliOptions {
@@ -49,7 +49,7 @@ export interface WaitEventsCliOptions {
 export interface ConfigCliOptions extends JsonOutputCliOptions {
   action: 'get' | 'set' | 'list';
   key?: WebCapConfigKey;
-  value?: boolean;
+  value?: boolean | WebCapEvidenceConfig;
 }
 
 export type CliCommand =
@@ -187,7 +187,7 @@ function parseMcpArgs(args: string[]): CliCommand {
 
 function parseConfigArgs(args: string[]): CliCommand {
   const command = createConfigParser();
-  const result = parseCommander<{ compact?: boolean }>(command, args);
+  const result = parseCommander<JsonOutputCliOptions>(command, args);
   if (result === 'help') {
     return helpForCommand(command);
   }
@@ -198,7 +198,10 @@ function parseConfigArgs(args: string[]): CliCommand {
       if (key !== undefined || value !== undefined) {
         throw new Error('config list does not accept a config key or value.');
       }
-      return { name: 'config', options: { action: 'list', compact: result.compact } };
+      return {
+        name: 'config',
+        options: { action: 'list', pretty: result.pretty },
+      };
     }
     case 'get': {
       if (key === undefined || value !== undefined) {
@@ -209,21 +212,22 @@ function parseConfigArgs(args: string[]): CliCommand {
         options: {
           action: 'get',
           key: parseConfigKeyOption(key),
-          compact: result.compact,
+          pretty: result.pretty,
         },
       };
     }
     case 'set': {
       if (key === undefined || value === undefined) {
-        throw new Error('config set requires a config key and true or false value.');
+        throw new Error('config set requires a config key and value.');
       }
+      const configKey = parseConfigKeyOption(key);
       return {
         name: 'config',
         options: {
           action: 'set',
-          key: parseConfigKeyOption(key),
-          value: parseBooleanOption(value),
-          compact: result.compact,
+          key: configKey,
+          value: parseConfigValueOption(configKey, value),
+          pretty: result.pretty,
         },
       };
     }
@@ -313,7 +317,7 @@ function createRootHelpParser(): Command {
 function scriptExecutionHelp(): string {
   return `Script execution:
   web-cap script-execute --script <code> [--input <json>] [--tab-id <id>] [--timeout-ms <ms>] [--register]
-  web-cap script-execute --script-file <path> [--input-file <path>] [--compact]
+  web-cap script-execute --script-file <path> [--input-file <path>] [--pretty]
 
   Runs JavaScript in the selected browser tab. Scripts receive one JSON object,
   return one JSON object, and can use cap.call(...) inside the script to call
@@ -329,6 +333,7 @@ ${scriptRuntimeApiHelp('  ')}
   --tab-id <id>         Browser tab id to target. Defaults to the active connected tab.
   --timeout-ms <ms>     Execution timeout in milliseconds.
   --register            Save the script for reuse only if it returns ok: true.
+  --pretty              Print formatted JSON output. Default output is compact.
 `;
 }
 
@@ -393,7 +398,7 @@ function createConfigParser(): Command {
     .argument('[action]')
     .argument('[key]')
     .argument('[value]')
-    .option('--compact', 'Print compact JSON output.');
+    .option('--pretty', 'Print formatted JSON output.');
 }
 
 function createSessionStatusParser(): Command {
@@ -424,7 +429,7 @@ function createScriptGetParser(): Command {
 function createScriptExecuteParser(): Command {
   return createParser('script-execute')
     .description(
-      'Run JavaScript in the selected browser tab with JSON input, observable page evidence, and Playwright-style page/locator helpers.',
+      'Run JavaScript in the selected browser tab with JSON input, optional observable page evidence, and Playwright-style page/locator helpers.',
     )
     .option('--script <code>', 'Script source code to run in the browser tab.')
     .option('--script-file <path>', 'Read script source code from a file.')
@@ -433,7 +438,7 @@ function createScriptExecuteParser(): Command {
     .option('--tab-id <id>', 'Browser tab id to target.', parseIntegerOption)
     .option('--timeout-ms <ms>', 'Execution timeout in milliseconds.', parseIntegerOption)
     .option('--register', 'Save the script for reuse only if it returns ok: true.')
-    .option('--compact', 'Print compact JSON output.');
+    .option('--pretty', 'Print formatted JSON output.');
 }
 
 function createScriptRegisterParser(): Command {
@@ -474,7 +479,7 @@ function createParser(name: string): Command {
 }
 
 function createJsonOutputParser(name: string): Command {
-  return createParser(name).option('--compact', 'Print compact JSON output.');
+  return createParser(name).option('--pretty', 'Print formatted JSON output.');
 }
 
 function parseCommander<T extends object>(command: Command, args: string[]): T | 'help' {
@@ -507,11 +512,52 @@ function formatCommanderError(error: unknown): string {
 }
 
 function parseConfigKeyOption(value: string): WebCapConfigKey {
-  if (value === 'activateTabOnScriptExecute') {
+  if (
+    value === 'activateTabOnScriptExecute' ||
+    value === 'evidence'
+  ) {
     return value;
   }
 
   throw new Error(`Unknown config key: ${value}`);
+}
+
+function parseConfigValueOption(
+  key: WebCapConfigKey,
+  value: string,
+): boolean | WebCapEvidenceConfig {
+  if (key === 'evidence') {
+    return parseEvidenceConfigOption(value);
+  }
+
+  return parseBooleanOption(value);
+}
+
+function parseEvidenceConfigOption(value: string): WebCapEvidenceConfig {
+  const options = value
+    .split(',')
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+  if (options.length === 0) {
+    throw new Error('evidence config requires events, visibleElements, common, all, or a comma-separated list.');
+  }
+
+  const parsed: WebCapEvidenceConfig = [];
+  for (const option of options) {
+    if (
+      option !== 'events' &&
+      option !== 'visibleElements' &&
+      option !== 'common' &&
+      option !== 'all'
+    ) {
+      throw new Error(`Unknown evidence option: ${option}`);
+    }
+    if (!parsed.includes(option)) {
+      parsed.push(option);
+    }
+  }
+
+  return parsed;
 }
 
 function parseIntegerOption(value: string): number {

@@ -1,5 +1,9 @@
 import type { ScriptDefinition } from '@shared/script-schema';
-import type { ExecutionEvidence, ExecutionEvidenceEvent } from '@shared/protocol';
+import type {
+  ExecutionEvidence,
+  ExecutionEvidenceEvent,
+  ExecutionEvidenceOption,
+} from '@shared/protocol';
 import { scriptRuntimeSource } from './injected/script-runtime.generated';
 import ts from 'typescript';
 
@@ -17,6 +21,7 @@ export interface ScriptExecutionExpressionOptions {
   managedWindowBridgeFunctionName?: string;
   managedTimerBridgeFunctionName?: string;
   managedBrowserBridgeFunctionName?: string;
+  evidence?: ExecutionEvidenceOption[];
 }
 
 export function scriptToFunctionExpression(code: string): string {
@@ -281,7 +286,7 @@ export function isExecutionInterruptedByNavigationError(error: unknown): boolean
 
 export function annotateExecutionResponse(
   response: ScriptExecutionResponse,
-  executor: 'user-script' | 'debugger',
+  _executor: 'user-script' | 'debugger',
   note?: string,
 ): ScriptExecutionResponse {
   const evidence = response.evidence ?? {
@@ -290,7 +295,7 @@ export function annotateExecutionResponse(
     screenshots: [],
   };
 
-  const events: ExecutionEvidenceEvent[] = [{ type: 'executor', value: executor }];
+  const events: ExecutionEvidenceEvent[] = [];
   if (note) {
     events.push({ type: 'note', value: note });
   }
@@ -328,6 +333,7 @@ export function buildScriptExecutionExpression(
     options.managedBrowserBridgeFunctionName === undefined
       ? null
       : String(options.managedBrowserBridgeFunctionName);
+  const evidence = options.evidence ?? [];
   const scripts = new Map<string, ScriptDefinition>();
   for (const item of scriptRegistry) {
     scripts.set(item.id, item);
@@ -351,6 +357,7 @@ export function buildScriptExecutionExpression(
   const managedWindowBridgeFunctionName = ${JSON.stringify(managedWindowBridgeFunctionName)};
   const managedTimerBridgeFunctionName = ${JSON.stringify(managedTimerBridgeFunctionName)};
   const managedBrowserBridgeFunctionName = ${JSON.stringify(managedBrowserBridgeFunctionName)};
+  const evidence = ${JSON.stringify(evidence)};
   const timerBridge = managedTimerBridgeFunctionName ? globalThis[managedTimerBridgeFunctionName] : null;
   const nativeSetTimeout = globalThis.setTimeout.bind(globalThis);
   const nativeClearTimeout = globalThis.clearTimeout.bind(globalThis);
@@ -407,6 +414,7 @@ export function buildScriptExecutionExpression(
     managedWindowBridgeFunctionName,
     managedTimerBridgeFunctionName,
     managedBrowserBridgeFunctionName,
+    evidence,
     scriptFactories,
   });
 })()

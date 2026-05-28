@@ -72,7 +72,7 @@ describe('execution helpers', () => {
     );
   });
 
-  it('annotates execution responses with the executor used', () => {
+  it('annotates execution responses with notes without adding executor noise', () => {
     const response = annotateExecutionResponse(
       {
         ok: true,
@@ -88,7 +88,6 @@ describe('execution helpers', () => {
     );
 
     expect(response.evidence?.events).toEqual([
-      { type: 'executor', value: 'debugger' },
       { type: 'note', value: 'fallback:csp' },
       { type: 'message', value: 'original-log' },
     ]);
@@ -329,6 +328,7 @@ export default async function (input) {
       parentScript,
       { text: 'hello' },
       [nestedScript],
+      { evidence: ['all'] },
     );
 
     expect(expression).toContain('function captureVisibleElementsDiff()');
@@ -417,6 +417,7 @@ export default async function () {
 
       const expression = buildScriptExecutionExpression(script, {}, [], {
         managedBrowserBridgeFunctionName: bridgeName,
+        evidence: ['events'],
       });
       const response = (await eval(expression)) as {
         ok: boolean;
@@ -439,6 +440,19 @@ export default async function () {
           button: 'left',
         },
       });
+
+      const commonExpression = buildScriptExecutionExpression(script, {}, [], {
+        managedBrowserBridgeFunctionName: bridgeName,
+        evidence: ['common'],
+      });
+      const commonResponse = (await eval(commonExpression)) as {
+        ok: boolean;
+        evidence?: { events: Array<{ type: string; value: Record<string, unknown> }> };
+      };
+      expect(commonResponse.ok).toBe(true);
+      expect(commonResponse.evidence?.events).not.toContainEqual(
+        expect.objectContaining({ type: 'managed_mouse' }),
+      );
     } finally {
       delete (globalThis as typeof globalThis & Record<string, unknown>)[bridgeName];
     }
@@ -617,7 +631,9 @@ export default async function () {
       },
     });
 
-    const expression = buildScriptExecutionExpression(script, {}, []);
+    const expression = buildScriptExecutionExpression(script, {}, [], {
+      evidence: ['events'],
+    });
     const response = (await eval(expression)) as {
       ok: boolean;
       evidence?: { events: Array<{ type: string; value: unknown }> };
@@ -625,10 +641,14 @@ export default async function () {
 
     expect(response.ok).toBe(true);
     expect(response.evidence?.events).toContainEqual({
-      type: 'page_url_changed',
+      type: 'page_changed',
       value: {
-        from: 'https://example.com/start',
-        to: 'https://example.com/next',
+        from: {
+          url: 'https://example.com/start',
+        },
+        to: {
+          url: 'https://example.com/next',
+        },
         mode: 'history',
         method: 'pushState',
       },

@@ -4,6 +4,7 @@ import {
   scriptSearchFiltersSchema,
   scriptTypeSchema,
 } from '@shared/script-schema';
+import { WEB_CAP_EVIDENCE_OPTIONS } from '../config';
 import type { WebCapAgentService } from './agent/contracts';
 import { browserCommandRequestSchemas } from './browser/command-contracts';
 import { RuntimeBridgeError } from './runtime/runtime-bridge';
@@ -18,6 +19,7 @@ export const executeScriptOptionsSchema = z
       .max(MAX_EXECUTION_TIMEOUT_MS)
       .optional(),
     activateTab: z.boolean().optional(),
+    evidence: z.array(z.enum(WEB_CAP_EVIDENCE_OPTIONS)).optional(),
   })
   .default({});
 
@@ -122,7 +124,7 @@ export const mcpToolDefinitions: {
   script_execute: {
     title: 'Execute Script',
     description:
-      'Execute script code directly in a specified tab of the connected browser. During execution, the script can call registered scripts through `cap.call("script-id", input)`, where the script id can be obtained via script search, for example: `(input) => cap.call("script-id", input)`. By default, inline executions receive an unregistered temporary script id and can be called through `cap.call("temp.script.xxxxxx", input)` while they remain in the latest 100 local history entries. Set `register` to true to request permanent registration; the script is registered only after execution succeeds with a result object that includes `ok: true`.',
+      'Execute script code directly in a specified tab of the connected browser. During execution, the script can call registered scripts through `cap.call("script-id", input)`, where the script id can be obtained via script search, for example: `(input) => cap.call("script-id", input)`. Inline executions receive a local script id in the execution result and local history. Set `register` to true to request permanent registration; the script is registered only after execution succeeds with a result object that includes `ok: true`.',
     inputSchema: {
       script: z
         .string()
@@ -149,6 +151,10 @@ export const mcpToolDefinitions: {
             .boolean()
             .optional()
             .describe('When true, activate the target browser tab before executing the script.'),
+          evidence: z
+            .array(z.enum(WEB_CAP_EVIDENCE_OPTIONS))
+            .optional()
+            .describe('Evidence to collect for the script run. Use multiple entries such as ["events", "visibleElements"], or ["all"]. Defaults to ["common"].'),
         })
         .describe('Optional execution settings for the script run.')
         .optional(),

@@ -42,11 +42,11 @@ Agent 可以在页面内运行 JavaScript，组合内置能力，并把有用脚
 - 页面内执行，脚本可以直接访问 DOM 和页面状态。
 - 能力复用，成功脚本可以被搜索、查看并再次调用。
 - 脚本组合，一个脚本可以通过 `cap.call(...)` 调用另一个脚本。
-- 执行后观察，每次脚本运行都可以返回页面变化证据。
+- 可选的执行后观察，在启用证据采集时脚本运行可以返回页面变化证据。
 - 本地持久化，让 agent 学到的工作流不只存在于单次运行中。
 - 命令行访问，让 agent 可以在普通 CLI 工作流中使用同一套浏览器能力。
 
-Web Cap 会围绕脚本执行观察页面。它会在脚本运行前记录可见元素快照，在运行期间跟踪 DOM 变化，然后在执行后重新采样变化区域，并返回包含 `added`、`removed`、`updated` 的可见元素 diff。执行证据还可以包含浏览器侧事件，例如新标签页打开、URL 变化、页面刷新、滚动变化、托管点击、键盘输入和脚本调用。
+启用证据采集后，Web Cap 会围绕脚本执行观察页面。它会在脚本运行前记录可见元素快照，在运行期间跟踪 DOM 变化，然后在执行后重新采样变化区域，并返回包含 `added`、`removed`、`updated` 的可见元素 diff。执行证据还可以包含浏览器侧事件，例如新标签页打开、URL 变化、页面刷新、滚动变化、托管点击、键盘输入和脚本调用。证据采集默认是 `common`，包含事件和可见元素 diff，但会排除较噪的 `managed_mouse` 事件；可以通过 `web-cap config set evidence events,visibleElements`、`web-cap config set evidence common`、`web-cap config set evidence all` 配置，或在 `script_execute` 中传入 `options.evidence`。
 
 这意味着 agent 拿到的不只是脚本声明的 JSON 结果，还能看到脚本执行后浏览器页面实际发生了什么。这对于校验结果、失败恢复，以及判断一个成功脚本是否值得注册成可复用能力都很重要。
 
@@ -220,7 +220,7 @@ pnpm cli browser-new-tab --url https://example.com --active true
 pnpm cli wait-events --duration-ms 10000
 ```
 
-JSON 输出类命令可以加 `--compact`，输出单行紧凑 JSON。
+JSON 输出类命令默认输出单行紧凑 JSON。需要可视化查看时可以加 `--pretty` 输出格式化 JSON。
 
 ## 本地状态
 

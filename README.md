@@ -42,11 +42,11 @@ Compared with action-first browser tools, Web Cap focuses on:
 - In-page execution, so scripts can work directly with the DOM and page state.
 - Reusable capabilities, so successful scripts can be searched, inspected, and called again.
 - Composable scripts, so one script can call another through `cap.call(...)`.
-- Post-execution observation, so each script run can return evidence about what changed on the page.
+- Optional post-execution observation, so script runs can return evidence about what changed on the page when evidence collection is enabled.
 - Local persistence, so agent-learned workflows can survive beyond a single run.
 - CLI access, so agents can use the same browser capabilities from normal command-line workflows.
 
-Web Cap observes the page around script execution. It snapshots visible elements before a script runs, tracks DOM mutations while it runs, then snapshots changed areas afterward and returns a visible-elements diff with `added`, `removed`, and `updated` items. Execution evidence can also include browser-side events such as opened tabs, URL changes, reloads, scroll changes, managed clicks, keyboard input, and script calls.
+Web Cap can observe the page around script execution when evidence collection is enabled. It snapshots visible elements before a script runs, tracks DOM mutations while it runs, then snapshots changed areas afterward and returns a visible-elements diff with `added`, `removed`, and `updated` items. Execution evidence can also include browser-side events such as opened tabs, URL changes, reloads, scroll changes, managed clicks, keyboard input, and script calls. Evidence collection defaults to `common`, which includes events and visible element diffs but excludes noisy `managed_mouse` events. Configure selected parts with `web-cap config set evidence events,visibleElements`, `web-cap config set evidence common`, `web-cap config set evidence all`, or pass `options.evidence` to `script_execute`.
 
 That means an agent does not only get a script's declared JSON result. It can also inspect what the browser visibly did after the script, which is useful for verification, recovery, and deciding whether a newly successful script should be registered as a reusable capability.
 
@@ -220,7 +220,7 @@ pnpm cli browser-new-tab --url https://example.com --active true
 pnpm cli wait-events --duration-ms 10000
 ```
 
-Use `--compact` on JSON-producing commands to print compact single-line JSON.
+JSON-producing commands print compact single-line JSON by default. Use `--pretty` to print formatted JSON for visual inspection.
 
 ## Local State
 

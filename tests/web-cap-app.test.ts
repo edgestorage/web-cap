@@ -155,6 +155,12 @@ describe('WebCapAgentApp', () => {
                 url: 'https://example.com/form',
                 events: [{ type: 'message', value: 'filled selector' }],
                 screenshots: [],
+                visibleElements: {
+                  added: [],
+                  removed: [],
+                  truncated: false,
+                  updated: [],
+                },
               },
             },
             { sessionId: 'runtime-session', requestId: envelope.requestId },
@@ -182,6 +188,14 @@ describe('WebCapAgentApp', () => {
     expect(execution.result).toEqual({
       selector: '#email',
       value: 'hello',
+    });
+    expect(execution.evidence).toEqual({
+      events: [{ type: 'message', value: 'filled selector' }],
+    });
+    expect(execution.tab).toEqual({
+      tabId: 101,
+      url: 'https://example.com/form',
+      title: 'Example Form',
     });
   });
 
@@ -232,6 +246,7 @@ describe('WebCapAgentApp', () => {
 
       expect(envelope.payload.tabId).toBe(101);
       expect(envelope.payload.activateTab).toBe(true);
+      expect(envelope.payload.evidence).toEqual(['common']);
 
       client?.send(
         JSON.stringify(
@@ -251,19 +266,58 @@ describe('WebCapAgentApp', () => {
       );
     });
 
-    await expect(
-      app.scriptExecute({
-        script: 'export default async function () { return { ok: true }; }',
-        input: {},
-        options: {
-          tabId: 101,
-          activateTab: true,
-        },
-      }),
-    ).resolves.toMatchObject({
+    const execution = await app.scriptExecute({
+      script: 'export default async function () { return { ok: true }; }',
+      input: {},
+      options: {
+        tabId: 101,
+        activateTab: true,
+      },
+    });
+
+    expect(execution).toMatchObject({
       status: 'succeeded',
       result: { ok: true },
     });
+    expect(execution.tab).toBeUndefined();
+  });
+
+  it('passes evidence execution options to the browser runtime', async () => {
+    await connectRuntime((envelope) => {
+      if (envelope.type !== 'execute_script') {
+        return;
+      }
+
+      expect(envelope.payload.evidence).toEqual(['events', 'visibleElements']);
+
+      client?.send(
+        JSON.stringify(
+          createRuntimeEnvelope(
+            'execution_result',
+            {
+              result: { ok: true },
+              evidence: {
+                url: 'https://example.com/form',
+                events: [],
+                screenshots: [],
+              },
+            },
+            { sessionId: 'runtime-session', requestId: envelope.requestId },
+          ),
+        ),
+      );
+    });
+
+    const execution = await app.scriptExecute({
+      script: 'export default async function () { return { ok: true }; }',
+      input: {},
+      options: {
+        tabId: 101,
+        evidence: ['events', 'visibleElements'],
+      },
+    });
+
+    expect(execution.result).toEqual({ ok: true });
   });
 
   it('executes script source with a temporary local id and persists it to local history', async () => {
@@ -296,7 +350,6 @@ describe('WebCapAgentApp', () => {
       input: { text: 'hello' },
     });
 
-    expect(execution.localScriptId).toBe('temp.script.000001');
     expect(execution.scriptId).toBe('temp.script.000001');
     expect(execution.result).toEqual({ echoed: 'hello' });
 
@@ -318,7 +371,7 @@ describe('WebCapAgentApp', () => {
     expect(history.entries[0]?.execution?.scriptId).toBe('temp.script.000001');
   });
 
-  it('adds a notice when the same long script is executed again', async () => {
+  it('does not add a temporary reuse notice when the same long script is executed again', async () => {
     await connectRuntime((envelope) => {
       if (envelope.type !== 'execute_script') {
         return;
@@ -362,15 +415,13 @@ describe('WebCapAgentApp', () => {
       input: { text: 'world' },
     });
 
-    expect(secondExecution.notice).toBe(
-      "You can call this unregistered temporary script while it remains in the latest 100 local history entries by using cap.call('temp.script.000002', xxx).",
-    );
+    expect(secondExecution.notice).toBeUndefined();
 
     const historyEntries = await app.scriptHistoryList();
-    expect(historyEntries[0]?.execution?.notice).toBe(secondExecution.notice);
+    expect(historyEntries[0]?.execution?.notice).toBeUndefined();
   });
 
-  it('adds a notice for scripts longer than 400 characters without requiring repetition', async () => {
+  it('does not add a temporary reuse notice for scripts longer than 400 characters', async () => {
     await connectRuntime((envelope) => {
       if (envelope.type !== 'execute_script') {
         return;
@@ -414,9 +465,7 @@ describe('WebCapAgentApp', () => {
       input: { source: 'hello world' },
     });
 
-    expect(execution.notice).toBe(
-      "You can call this unregistered temporary script while it remains in the latest 100 local history entries by using cap.call('temp.script.000001', xxx).",
-    );
+    expect(execution.notice).toBeUndefined();
   });
 
   it('allows temporary script executions to be reused through cap.call', async () => {
@@ -549,7 +598,6 @@ describe('WebCapAgentApp', () => {
     expect(executedScriptIds).toEqual(['local.script.000001']);
     expect(executedTimeouts).toEqual([60_000]);
     expect(execution.scriptId).toBe('local.script.000001');
-    expect(execution.localScriptId).toBe('local.script.000001');
     expect(execution.notice).toBe(
       "Registered as permanent script local.script.000001. You can reuse it by calling cap.call('local.script.000001', xxx).",
     );
@@ -600,7 +648,6 @@ describe('WebCapAgentApp', () => {
     });
 
     expect(execution.scriptId).toBe('temp.script.000001');
-    expect(execution.localScriptId).toBe('temp.script.000001');
     expect(execution.notice).toBe(
       'Script local.script.000001 was not registered because register=true requires the execution result to include ok: true. It remains available temporarily as temp.script.000001.',
     );
@@ -653,7 +700,6 @@ describe('WebCapAgentApp', () => {
     });
 
     expect(execution.scriptId).toBe('temp.script.000001');
-    expect(execution.localScriptId).toBe('temp.script.000001');
     expect(execution.notice).toBe(
       'Script local.script.000001 was not registered because register=true requires the execution result to include ok: true. It remains available temporarily as temp.script.000001.',
     );
@@ -699,7 +745,6 @@ describe('WebCapAgentApp', () => {
 
     expect(execution.status).toBe('succeeded');
     expect(execution.scriptId).toBe('temp.script.000001');
-    expect(execution.localScriptId).toBe('temp.script.000001');
     expect(execution.notice).toBe(
       'Script local.script.000001 could not be registered: registry offline. It remains available temporarily as temp.script.000001.',
     );
@@ -1134,8 +1179,6 @@ describe('WebCapAgentApp', () => {
         await new Promise((resolve) => setTimeout(resolve, 40));
         return {
           scriptId: 'temp.script.000001',
-          localScriptId: 'temp.script.000001',
-          scriptType: 'act',
           status: 'succeeded',
           result: { ok: true },
           evidence: { events: [], screenshots: [] },
@@ -1630,7 +1673,7 @@ describe('WebCapAgentApp', () => {
       },
     });
 
-    const executionPromise = bridge.executeScript(script, {});
+    const executionPromise = bridge.executeScript(script, {}, { evidence: ['events'] });
     await vi.advanceTimersByTimeAsync(5_010);
     const execution = await executionPromise;
 

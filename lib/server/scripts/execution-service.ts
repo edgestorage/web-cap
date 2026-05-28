@@ -9,6 +9,7 @@ import type {
   ScriptExecutionHistoryEntry,
   ScriptExecutionResult,
   RuntimeTabSnapshot,
+  ExecutionEvidenceOption,
 } from '@shared/protocol';
 import type {
   ExecuteScriptOptions,
@@ -36,6 +37,8 @@ export interface ExecutionPlan {
   registry: ScriptDefinition[];
   timeoutMs: number;
   activateTab?: boolean;
+  evidence: ExecutionEvidenceOption[];
+  includeTabInResult: boolean;
   historyMode: 'temporary' | 'permanent';
 }
 
@@ -139,6 +142,8 @@ export class ScriptExecutionService {
       registry: await this.registryService.buildExecutionScriptRegistry(scriptDefinition.id),
       timeoutMs: scriptDefinition.script.timeoutMs,
       activateTab: options.activateTab,
+      evidence: normalizeEvidenceOptions(options.evidence),
+      includeTabInResult: options.tabId === undefined,
       historyMode,
     };
   }
@@ -148,6 +153,8 @@ export class ScriptExecutionService {
       tabId: plan.target.tabId,
       scriptRegistry: plan.registry,
       activateTab: plan.activateTab,
+      evidence: plan.evidence,
+      includeTabInResult: plan.includeTabInResult,
     });
   }
 
@@ -198,7 +205,7 @@ export class ScriptExecutionService {
         notice = buildRegistrationSkippedNotice(reserved.localScriptId, resultLocalScriptId);
       }
     } else {
-      notice = await this.buildScriptReuseNotice(reserved.localScriptId, request.script);
+      notice = undefined;
     }
 
     const executionWithNotice =
@@ -214,34 +221,7 @@ export class ScriptExecutionService {
       await this.scriptExecutionHistory.markSucceeded(resultLocalScriptId, executionWithNotice);
     }
 
-    return {
-      ...executionWithNotice,
-      localScriptId: resultLocalScriptId,
-    };
-  }
-
-  private async buildScriptReuseNotice(
-    localScriptId: string,
-    script: string,
-  ): Promise<string | undefined> {
-    if (script.length > 400) {
-      return buildTempScriptReuseNotice(localScriptId);
-    }
-
-    if (script.length <= 150) {
-      return undefined;
-    }
-
-    const historyEntries = await this.scriptExecutionHistory.list();
-    const duplicateCount = historyEntries.filter(
-      (entry) => entry.localScriptId !== localScriptId && entry.script === script,
-    ).length;
-
-    if (duplicateCount === 0) {
-      return undefined;
-    }
-
-    return buildTempScriptReuseNotice(localScriptId);
+    return executionWithNotice;
   }
 }
 
@@ -259,16 +239,18 @@ function normalizeExecuteScriptOptions(options?: ExecuteScriptOptions): ExecuteS
   return parsed.data;
 }
 
+function normalizeEvidenceOptions(
+  evidence: ExecutionEvidenceOption[] | undefined,
+): ExecutionEvidenceOption[] {
+  return [...new Set(evidence ?? (['common'] as ExecutionEvidenceOption[]))];
+}
+
 function buildHistoryOptions(options: ExecuteScriptOptions): { tabId?: number } | undefined {
   if (options.tabId === undefined) {
     return undefined;
   }
 
   return { tabId: options.tabId };
-}
-
-function buildTempScriptReuseNotice(localScriptId: string): string {
-  return `You can call this unregistered temporary script while it remains in the latest 100 local history entries by using cap.call('${localScriptId}', xxx).`;
 }
 
 function buildPermanentScriptNotice(scriptId: string): string {

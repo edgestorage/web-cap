@@ -7,6 +7,7 @@ import type {
   BrowserCommandResult,
   ScriptExecutionHistoryEntry,
   ScriptExecutionResult,
+  ExecutionEvidenceOption,
   RuntimeSessionSnapshot,
 } from '@shared/protocol';
 import type {
@@ -26,11 +27,10 @@ export interface ExecuteScriptOptions {
   tabId?: number;
   timeoutMs?: number;
   activateTab?: boolean;
+  evidence?: ExecutionEvidenceOption[];
 }
 
-export interface ExecuteScriptResult extends ScriptExecutionResult {
-  localScriptId: string;
-}
+export type ExecuteScriptResult = ScriptExecutionResult;
 
 export interface WebCapAgentService {
   start(): Promise<void>;

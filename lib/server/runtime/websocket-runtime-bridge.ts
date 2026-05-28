@@ -9,12 +9,14 @@ import {
   type BrowserCommandResult,
   type ScriptExecutionResult,
   type ExecutionEvidence,
+  type ExecutionEvidenceOption,
   type ExecuteScriptOptions,
   type ScriptExecutionHistoryEntry,
   type RuntimeConnectionSnapshot,
   type RuntimeEnvelope,
   type RuntimeHelloPayload,
   type RuntimeSessionSnapshot,
+  type RuntimeTabSummary,
   type RuntimeTabSnapshot,
 } from '@shared/protocol';
 import { RuntimeBridge, RuntimeBridgeError, type BrowserCommandOptions } from './runtime-bridge';
@@ -26,6 +28,7 @@ interface PendingExecution {
   sessionId: string;
   scriptDefinition: ScriptDefinition;
   tab: RuntimeTabSnapshot;
+  includeTabInResult: boolean;
   startedAt: number;
   timer: NodeJS.Timeout;
   resolve: (value: ScriptExecutionResult) => void;
@@ -193,6 +196,7 @@ export class WebSocketRuntimeBridge implements RuntimeBridge {
     }
 
     const requestId = randomUUID();
+    const evidence = normalizeEvidenceOptions(options.evidence);
 
     return await new Promise<ScriptExecutionResult>((resolve, reject) => {
       const timeoutMs = scriptDefinition.script.timeoutMs ?? DEFAULT_EXECUTION_TIMEOUT_MS;
@@ -202,7 +206,6 @@ export class WebSocketRuntimeBridge implements RuntimeBridge {
         this.pendingExecutions.delete(requestId);
         resolve({
           scriptId: scriptDefinition.id,
-          scriptType: scriptDefinition.type,
           status: 'interrupted',
           result: {
             interrupted: true,
@@ -210,22 +213,23 @@ export class WebSocketRuntimeBridge implements RuntimeBridge {
             message: `Browser runtime did not return a result within ${responseTimeoutMs}ms for script ${scriptDefinition.id}.`,
           },
           evidence: {
-            url: tab.url,
-            events: [
-              {
-                type: 'execution_interrupted_by_timeout',
-                value: {
-                  scriptId: scriptDefinition.id,
-                  timeoutMs,
-                  responseTimeoutMs,
-                  requestId,
-                },
-              },
-            ],
-            screenshots: [],
+            events:
+              shouldCollectExecutionEvidence(evidence, 'events')
+                ? [
+                    {
+                      type: 'execution_interrupted_by_timeout',
+                      value: {
+                        scriptId: scriptDefinition.id,
+                        timeoutMs,
+                        responseTimeoutMs,
+                        requestId,
+                      },
+                    },
+                  ]
+                : [],
           },
           timingMs: Date.now() - startedAt,
-          tab,
+          tab: summarizeExecutionTab(tab, options.includeTabInResult ?? options.tabId === undefined),
         });
       }, responseTimeoutMs);
 
@@ -233,6 +237,7 @@ export class WebSocketRuntimeBridge implements RuntimeBridge {
         sessionId: target.sessionId,
         scriptDefinition,
         tab,
+        includeTabInResult: options.includeTabInResult ?? options.tabId === undefined,
         startedAt,
         timer,
         resolve,
@@ -249,6 +254,7 @@ export class WebSocketRuntimeBridge implements RuntimeBridge {
             scriptRegistry: options.scriptRegistry ?? [],
             tabId: tab.tabId,
             activateTab: options.activateTab,
+            evidence,
           },
           {
             requestId,
@@ -437,12 +443,11 @@ export class WebSocketRuntimeBridge implements RuntimeBridge {
         this.pendingExecutions.delete(envelope.requestId);
         pending.resolve({
           scriptId: pending.scriptDefinition.id,
-          scriptType: pending.scriptDefinition.type,
           status: envelope.payload.status ?? inferExecutionStatus(envelope.payload.evidence),
           result: envelope.payload.result,
-          evidence: envelope.payload.evidence,
+          evidence: summarizeExecutionEvidence(envelope.payload.evidence),
           timingMs: Date.now() - pending.startedAt,
-          tab: pending.tab,
+          tab: summarizeExecutionTab(pending.tab, pending.includeTabInResult),
         });
         break;
       }
@@ -639,4 +644,63 @@ function inferExecutionStatus(evidence: ExecutionEvidence): 'succeeded' | 'inter
   return evidence.events.some((event) => String(event.type).startsWith('execution_interrupted_'))
     ? 'interrupted'
     : 'succeeded';
+}
+
+function summarizeExecutionEvidence(evidence: ExecutionEvidence): ExecutionEvidence {
+  const summarized: ExecutionEvidence = {
+    events: evidence.events,
+  };
+
+  if (evidence.screenshots?.length) {
+    summarized.screenshots = evidence.screenshots;
+  }
+
+  if (evidence.visibleElements && hasVisibleElementChanges(evidence.visibleElements)) {
+    summarized.visibleElements = evidence.visibleElements;
+  }
+
+  return summarized;
+}
+
+function hasVisibleElementChanges(
+  visibleElements: NonNullable<ExecutionEvidence['visibleElements']>,
+): boolean {
+  return (
+    visibleElements.truncated ||
+    visibleElements.added.length > 0 ||
+    visibleElements.removed.length > 0 ||
+    visibleElements.updated.length > 0
+  );
+}
+
+function shouldCollectExecutionEvidence(
+  evidence: ExecutionEvidenceOption[] | undefined,
+  option: Exclude<ExecutionEvidenceOption, 'common' | 'all'>,
+): boolean {
+  return Boolean(
+    evidence?.includes('all') ||
+      evidence?.includes('common') ||
+      evidence?.includes(option),
+  );
+}
+
+function normalizeEvidenceOptions(
+  evidence: ExecutionEvidenceOption[] | undefined,
+): ExecutionEvidenceOption[] {
+  return [...new Set(evidence ?? (['common'] as ExecutionEvidenceOption[]))];
+}
+
+function summarizeExecutionTab(
+  tab: RuntimeTabSnapshot,
+  includeTab: boolean,
+): RuntimeTabSummary | undefined {
+  if (!includeTab) {
+    return undefined;
+  }
+
+  return {
+    tabId: tab.tabId,
+    url: tab.url,
+    title: tab.title,
+  };
 }

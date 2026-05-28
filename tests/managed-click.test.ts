@@ -199,7 +199,9 @@ describe('managed click hook', () => {
     expect(evidence.events).toContainEqual(
       expect.objectContaining({
         type: 'managed_click',
-        value: expect.objectContaining({ x: 75, y: 57 }),
+        value: expect.objectContaining({
+          point: { x: 75, y: 57 },
+        }),
       }),
     );
   });
@@ -266,12 +268,11 @@ describe('managed click hook', () => {
       expect.objectContaining({
         type: 'managed_click',
         value: expect.objectContaining({
-          x: 70,
-          y: 60,
-          hitTarget: expect.objectContaining({
+          point: { x: 70, y: 60 },
+          target: expect.objectContaining({
             text: '最多点赞',
-            containsOriginal: false,
           }),
+          containsOriginal: false,
         }),
       }),
     );
@@ -325,10 +326,9 @@ describe('managed click hook', () => {
     expect(bridgePayloads).toMatchObject([{ action: 'down', clientX: 70, clientY: 60 }]);
     expect(evidence.events).toContainEqual(
       expect.objectContaining({
-        type: 'managed_click',
+        type: 'managed_mouse',
         value: expect.objectContaining({
           action: 'down',
-          source: 'dispatchEvent(MouseEvent.mousedown)',
         }),
       }),
     );
@@ -410,5 +410,14 @@ describe('managed click hook', () => {
     expect(bridgeResolved).toBe(true);
     expect(waitCalls).toBe(15);
     expect(bridgePayloads).toMatchObject([{ action: 'move', clientX: 70, clientY: 60 }]);
+    expect(evidence.events).toContainEqual(
+      expect.objectContaining({
+        type: 'managed_mouse',
+        value: expect.objectContaining({
+          action: 'move',
+          point: { x: 70, y: 60 },
+        }),
+      }),
+    );
   });
 });
