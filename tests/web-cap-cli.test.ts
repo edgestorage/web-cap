@@ -3,7 +3,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-  buildScriptRegisterRequest,
   buildScriptExecuteRequest,
   parseCliArgs,
   runCli,
@@ -25,12 +24,6 @@ describe('WEB_CAP CLI', () => {
     return {
       async start() {},
       async close() {},
-      async scriptSearch() {
-        return [];
-      },
-      async scriptGet() {
-        throw new Error('not used');
-      },
       async scriptExecute() {
         throw new Error('not used');
       },
@@ -39,9 +32,6 @@ describe('WEB_CAP CLI', () => {
       },
       async scriptRegistryList() {
         return [];
-      },
-      async scriptRegister() {
-        throw new Error('not used');
       },
       async browserNewTab() {
         throw new Error('not used');
@@ -153,21 +143,6 @@ describe('WEB_CAP CLI', () => {
       name: 'session-status',
       options: { pretty: true },
     });
-    expect(parseCliArgs(['script-search', 'inspect page', '--type', 'act', '--site', 'docs'])).toEqual({
-      name: 'script-search',
-      options: {
-        query: 'inspect page',
-        type: 'act',
-        site: 'docs',
-      },
-    });
-    expect(parseCliArgs(['script-get', 'builtin.page.inspect', '--version', '1.0.0'])).toEqual({
-      name: 'script-get',
-      options: {
-        scriptId: 'builtin.page.inspect',
-        version: '1.0.0',
-      },
-    });
     expect(parseCliArgs(['browser-new-tab', '--url', 'https://example.com', '--active', 'false'])).toEqual({
       name: 'browser-new-tab',
       options: {
@@ -277,32 +252,6 @@ describe('WEB_CAP CLI', () => {
     expect(stdout).not.toContain('browser-new-tab');
   });
 
-  it('loads script-register definition from JSON and files', async () => {
-    const definition = {
-      id: 'local.test',
-      name: 'Test script',
-      version: '1.0.0',
-      status: 'active',
-      type: 'act',
-    };
-
-    await expect(
-      buildScriptRegisterRequest({
-        definition: JSON.stringify(definition),
-      }),
-    ).resolves.toEqual(definition);
-
-    tempDir = await mkdtemp(join(tmpdir(), 'web-cap-cli-test-'));
-    const definitionFile = join(tempDir, 'definition.json');
-    await writeFile(definitionFile, JSON.stringify(definition));
-
-    await expect(
-      buildScriptRegisterRequest({
-        definitionFile,
-      }),
-    ).resolves.toEqual(definition);
-  });
-
   it('routes MCP-equivalent commands through the injected service', async () => {
     const calls: string[] = [];
     const service = createService({
@@ -313,45 +262,6 @@ describe('WEB_CAP CLI', () => {
           tabs: [],
           authenticatedSites: [],
         };
-      },
-      async scriptSearch(query, filters) {
-        calls.push(`scriptSearch:${query}:${filters?.type ?? ''}:${filters?.site ?? ''}`);
-        return [
-          {
-            scriptId: 'builtin.page.inspect',
-            name: 'Inspect current page',
-            summary: 'Inspect current page.',
-            type: 'act',
-            target: { site: 'generic-web' },
-            tags: ['builtin'],
-            score: 1,
-          },
-        ];
-      },
-      async scriptGet(scriptId, version) {
-        calls.push(`scriptGet:${scriptId}:${version ?? ''}`);
-        return {
-          scriptId,
-          name: 'Inspect current page',
-          version,
-          type: 'act',
-          summary: 'Inspect current page.',
-          description: 'Inspect current page.',
-          target: { site: 'generic-web' },
-          tags: ['builtin'],
-          inputSchema: { type: 'object' },
-          outputSchema: { type: 'object' },
-        } as unknown as Awaited<ReturnType<WebCapAgentService['scriptGet']>>;
-      },
-      async scriptRegister(scriptDefinition) {
-        calls.push(`scriptRegister:${(scriptDefinition as { id?: string }).id ?? ''}`);
-        return {
-          id: (scriptDefinition as { id: string }).id,
-          scriptDefinition,
-          status: 'active',
-          publishedAt: '2026-05-15T00:00:00.000Z',
-          updatedAt: '2026-05-15T00:00:00.000Z',
-        } as Awaited<ReturnType<WebCapAgentService['scriptRegister']>>;
       },
       async browserNewTab(input) {
         calls.push(`browserNewTab:${input.url ?? ''}:${String(input.active)}`);
@@ -373,9 +283,6 @@ describe('WEB_CAP CLI', () => {
 
     const runs = [
       ['session-status'],
-      ['script-search', 'inspect', '--type', 'act', '--site', 'generic-web'],
-      ['script-get', 'builtin.page.inspect', '--version', '1.0.0'],
-      ['script-register', '--definition', '{"id":"local.test"}'],
       ['browser-new-tab', '--url', 'https://example.com', '--active', 'true'],
     ];
 
@@ -398,9 +305,6 @@ describe('WEB_CAP CLI', () => {
 
     expect(calls).toEqual([
       'sessionStatus',
-      'scriptSearch:inspect:act:generic-web',
-      'scriptGet:builtin.page.inspect:1.0.0',
-      'scriptRegister:local.test',
       'browserNewTab:https://example.com:true',
     ]);
   });
@@ -500,12 +404,6 @@ describe('WEB_CAP CLI', () => {
     const service = {
       async start() {},
       async close() {},
-      async scriptSearch() {
-        return [];
-      },
-      async scriptGet() {
-        throw new Error('not used');
-      },
       async scriptExecute(request: ExecuteScriptRequest) {
         calls.push(request);
         return {
@@ -529,9 +427,6 @@ describe('WEB_CAP CLI', () => {
       },
       async scriptRegistryList() {
         return [];
-      },
-      async scriptRegister() {
-        throw new Error('not used');
       },
       async browserNewTab() {
         throw new Error('not used');
@@ -690,12 +585,6 @@ describe('WEB_CAP CLI', () => {
     const service = {
       async start() {},
       async close() {},
-      async scriptSearch() {
-        return [];
-      },
-      async scriptGet() {
-        throw new Error('not used');
-      },
       async scriptExecute() {
         throw new Error('not used');
       },
@@ -704,9 +593,6 @@ describe('WEB_CAP CLI', () => {
       },
       async scriptRegistryList() {
         return [];
-      },
-      async scriptRegister() {
-        throw new Error('not used');
       },
       async browserNewTab() {
         throw new Error('not used');

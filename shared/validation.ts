@@ -1,20 +1,9 @@
 import Ajv, { type ErrorObject, type ValidateFunction } from 'ajv';
-import type {
-  ScriptDefinition,
-  ObjectSchemaDefinition,
-} from './script-schema';
+import type { ObjectSchemaDefinition } from './script-schema';
 
 export interface ValidationResult {
   ok: boolean;
   errors: string[];
-}
-
-export interface ScriptSchemaSummary {
-  scriptId: string;
-  name: string;
-  description: string;
-  inputSchema: ObjectSchemaDefinition;
-  outputSchema: ObjectSchemaDefinition;
 }
 
 const ajv = new Ajv({ allErrors: true, strict: false });
@@ -97,14 +86,4 @@ export function matchesUrlPatterns(url: string, patterns: string[]): boolean {
   }
 
   return patterns.some((pattern) => wildcardToRegExp(pattern).test(url));
-}
-
-export function toSchemaSummary(scriptDefinition: ScriptDefinition): ScriptSchemaSummary {
-  return {
-    scriptId: scriptDefinition.id,
-    name: scriptDefinition.name,
-    description: scriptDefinition.summary,
-    inputSchema: scriptDefinition.inputSchema,
-    outputSchema: scriptDefinition.outputSchema,
-  };
 }

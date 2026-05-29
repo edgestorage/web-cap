@@ -1,7 +1,5 @@
 import {
-  type CloudScriptRecord,
   type ScriptDefinition,
-  type ScriptSearchFilters,
 } from '@shared/script-schema';
 import type {
   BrowserCommandResult,
@@ -76,14 +74,6 @@ export class WebCapAgentApp implements WebCapAgentService {
     await this.runtimeBridge.close();
   }
 
-  async scriptSearch(query: string, filters?: ScriptSearchFilters) {
-    return await this.scriptRegistryService.search(query, filters);
-  }
-
-  async scriptGet(scriptId: string, version?: string) {
-    return await this.scriptRegistryService.getSchemaSummary(scriptId, version);
-  }
-
   async scriptExecute(request: ExecuteScriptRequest): Promise<ExecuteScriptResult> {
     return await this.scriptExecutionService.executeInline(request);
   }
@@ -99,12 +89,6 @@ export class WebCapAgentApp implements WebCapAgentService {
 
   async scriptRegistryList(): Promise<ScriptDefinition[]> {
     return await this.scriptRegistryService.buildRegisteredScriptRegistry();
-  }
-
-  async scriptRegister(rawScriptDefinition: unknown): Promise<CloudScriptRecord> {
-    const record = await this.scriptRegistryService.register(rawScriptDefinition);
-    await this.syncScriptRegistry();
-    return record;
   }
 
   async browserNewTab(input: CreateTabInput): Promise<BrowserCommandResult> {

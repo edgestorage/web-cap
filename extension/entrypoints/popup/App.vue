@@ -14,7 +14,6 @@ const updatedAt = ref('');
 const registryUpdatedAt = ref('');
 const isLoading = ref(true);
 const activeView = ref<'registry' | 'history'>('registry');
-const scriptSearch = ref('');
 const scriptTypeFilter = ref<'all' | ScriptType>('all');
 const expandedScripts = ref<string[]>([]);
 const dialogTitle = ref('');
@@ -25,23 +24,8 @@ const registeredScripts = computed(() =>
   scripts.value.filter((script) => !script.id.startsWith('temp.script.')),
 );
 const filteredScripts = computed(() => {
-  const query = scriptSearch.value.trim().toLowerCase();
-
   return registeredScripts.value
     .filter((script) => scriptTypeFilter.value === 'all' || script.type === scriptTypeFilter.value)
-    .filter((script) => {
-      if (!query) {
-        return true;
-      }
-
-      return [
-        script.id,
-        script.name,
-        script.summary,
-        script.target.site,
-        ...script.tags,
-      ].some((value) => value.toLowerCase().includes(query));
-    })
     .slice(0, 30);
 });
 
@@ -275,7 +259,6 @@ onBeforeUnmount(() => {
 
     <section v-else-if="activeView === 'registry'" class="registry-panel">
       <div class="toolbar">
-        <input v-model="scriptSearch" type="search" placeholder="Search scripts" />
         <select v-model="scriptTypeFilter" aria-label="Script type">
           <option value="all">All types</option>
           <option value="read">Read</option>
@@ -285,7 +268,7 @@ onBeforeUnmount(() => {
 
       <section v-if="filteredScripts.length === 0" class="empty-state">
         <p>No registered scripts found.</p>
-        <p class="hint">Connect the local runtime or clear the filters.</p>
+        <p class="hint">Connect the local runtime or clear the type filter.</p>
       </section>
 
       <section v-else class="registry-list">

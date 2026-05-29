@@ -10,8 +10,6 @@ import {
 import { dirname, join } from 'node:path';
 import type {
   ScriptDefinition,
-  ScriptSearchFilters,
-  ScriptSearchResult,
   CloudScriptRecord,
 } from '@shared/script-schema';
 import { cloudScriptRecordSchema } from '@shared/script-schema';
@@ -59,24 +57,6 @@ interface ScriptFileRecord {
   lastExecutedPage: string | null;
 }
 
-function tokenize(text: string): string[] {
-  return text
-    .toLowerCase()
-    .split(/[^\p{Letter}\p{Number}]+/u)
-    .filter(Boolean);
-}
-
-function scoreSearchText(searchText: string, query: string): number {
-  const queryTokens = tokenize(query);
-  if (queryTokens.length === 0) {
-    return 1;
-  }
-
-  const corpus = new Set(tokenize(searchText));
-  const matches = queryTokens.filter((token) => corpus.has(token)).length;
-  return matches / queryTokens.length;
-}
-
 export class FileScriptProvider implements ScriptProvider {
   private readonly stateDir: string;
   private readonly scriptsDir: string;
@@ -86,40 +66,6 @@ export class FileScriptProvider implements ScriptProvider {
     this.stateDir = stateDir;
     this.scriptsDir = join(this.stateDir, 'scripts');
     this.indexPath = join(this.stateDir, 'script-registry.sqlite');
-  }
-
-  async search(
-    query: string,
-    filters?: ScriptSearchFilters,
-  ): Promise<ScriptSearchResult[]> {
-    const rows = await this.withIndex((db) => {
-      const clauses = ['status = ?'];
-      const values: unknown[] = ['active'];
-      if (filters?.type) {
-        clauses.push('type = ?');
-        values.push(filters.type);
-      }
-      if (filters?.site) {
-        clauses.push('site = ?');
-        values.push(filters.site);
-      }
-
-      return db
-        .prepare(`SELECT * FROM script_records WHERE ${clauses.join(' AND ')}`)
-        .all(...values) as ScriptIndexRow[];
-    });
-
-    return rows
-      .map((row) => ({
-        scriptId: row.script_id,
-        name: row.name,
-        summary: row.summary,
-        type: row.type,
-        site: row.site,
-        tags: parseJsonArray(row.tags_json),
-        score: scoreSearchText(row.search_text, query),
-      }))
-      .sort((left, right) => right.score - left.score);
   }
 
   async getById(id: string, version?: string): Promise<ScriptDefinition | null> {

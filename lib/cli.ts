@@ -5,7 +5,6 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   buildScriptExecuteRequest,
-  buildScriptRegisterRequest,
   parseCliArgs,
   type CliCommand,
   type JsonOutputCliOptions,
@@ -20,7 +19,7 @@ import type { ExecuteScriptRequest, WebCapAgentService } from './server/agent/co
 import { executeCoreTool, type CoreToolName } from './server/tool-contracts';
 import { runMcpServer } from './mcp-server';
 
-export { buildScriptExecuteRequest, buildScriptRegisterRequest, parseCliArgs } from './cli-parser';
+export { buildScriptExecuteRequest, parseCliArgs } from './cli-parser';
 
 interface CliIo {
   stdout: Pick<NodeJS.WriteStream, 'write'>;
@@ -60,11 +59,6 @@ export async function runCli(
     if (scriptExecuteRequest) {
       await applyConfiguredScriptExecutionOptions(scriptExecuteRequest);
     }
-    const scriptRegisterRequest =
-      command.name === 'script-register'
-        ? await buildScriptRegisterRequest(command.options)
-        : undefined;
-
     const app = await connect();
     try {
       const coreToolName = coreToolNameForCommand(command);
@@ -72,7 +66,7 @@ export async function runCli(
         const result = await executeCoreTool(
           app,
           coreToolName,
-          buildCoreToolInput(command, scriptExecuteRequest, scriptRegisterRequest),
+          buildCoreToolInput(command, scriptExecuteRequest),
         );
         writeJson(io, result, jsonOutputOptionsForCommand(command));
         return 0;
@@ -164,14 +158,8 @@ function coreToolNameForCommand(command: CliCommand): CoreToolName | undefined {
   switch (command.name) {
     case 'session-status':
       return 'session_status';
-    case 'script-search':
-      return 'script_search';
-    case 'script-get':
-      return 'script_get';
     case 'script-execute':
       return 'script_execute';
-    case 'script-register':
-      return 'script_register';
     case 'browser-new-tab':
       return 'browser_new_tab';
     default:
@@ -182,28 +170,12 @@ function coreToolNameForCommand(command: CliCommand): CoreToolName | undefined {
 function buildCoreToolInput(
   command: CliCommand,
   scriptExecuteRequest: ExecuteScriptRequest | undefined,
-  scriptRegisterRequest: Record<string, unknown> | undefined,
 ): unknown {
   switch (command.name) {
     case 'session-status':
       return {};
-    case 'script-search':
-      return {
-        query: command.options.query,
-        filters: {
-          type: command.options.type,
-          site: command.options.site,
-        },
-      };
-    case 'script-get':
-      return {
-        scriptId: command.options.scriptId,
-        version: command.options.version,
-      };
     case 'script-execute':
       return scriptExecuteRequest!;
-    case 'script-register':
-      return { scriptDefinition: scriptRegisterRequest! };
     case 'browser-new-tab':
       return {
         url: command.options.url,
@@ -217,10 +189,7 @@ function buildCoreToolInput(
 function jsonOutputOptionsForCommand(command: CliCommand): JsonOutputCliOptions {
   switch (command.name) {
     case 'session-status':
-    case 'script-search':
-    case 'script-get':
     case 'script-execute':
-    case 'script-register':
     case 'browser-new-tab':
     case 'config':
       return command.options;

@@ -122,36 +122,20 @@ Run CLI commands from an agent or terminal:
 
 ```bash
 pnpm cli session-status
-pnpm cli script-search "inspect page" --type read --site generic-web
-pnpm cli script-get builtin.page.inspect
 ```
 
 A typical agent flow is:
 
-1. Use `script-search` to find a reusable script.
-2. Use `script-get` to inspect its input and output schema.
-3. Use `script-execute` to run it against the connected browser.
-4. Use `script-register` when a script should become reusable.
+1. Use `script-execute` to run script code against the connected browser.
+2. Add `--register` to `script-execute` when a successful inline script should become reusable.
 
 ## CLI Commands
-
-### `script-search`
-
-Search callable built-in and locally registered scripts. Searching first is recommended because reusable scripts usually make browser work faster and more reliable.
-
-### `script-get`
-
-Read one script definition and return its callable schema summary, including `scriptId`, `name`, `description`, `inputSchema`, and `outputSchema`.
 
 ### `script-execute`
 
 Execute script code in the selected browser tab. Scripts receive one object argument and return one JSON object.
 
-`script-execute` accepts optional execution settings such as `--timeout-ms`, `--script-file`, and `--input-file`. During execution, scripts can call other scripts through `cap.call(scriptId, input)`.
-
-### `script-register`
-
-Register a reusable script definition with metadata, input JSON schema, output JSON schema, and script function code. The output schema must declare an `ok` property and include `ok` in `required`.
+`script-execute` accepts optional execution settings such as `--timeout-ms`, `--script-file`, `--input-file`, and `--register`. During execution, scripts can call other scripts through `cap.call(scriptId, input)`. `--register` saves the inline script only after execution succeeds with `ok: true`.
 
 ### Browser commands
 
@@ -205,6 +189,7 @@ Use files for larger payloads:
 
 ```bash
 pnpm cli script-execute \
+  --tab-id 1 \
   --script-file ./script.js \
   --input-file ./input.json
 ```
@@ -213,9 +198,7 @@ Common CLI commands:
 
 ```bash
 pnpm cli session-status
-pnpm cli script-search "inspect page" --type read --site generic-web
-pnpm cli script-get builtin.page.inspect
-pnpm cli script-register --definition-file ./script-definition.json
+pnpm cli script-execute --tab-id 1 --script-file ./script.js --input-file ./input.json --register
 pnpm cli browser-new-tab --url https://example.com --active true
 pnpm cli wait-events --duration-ms 10000
 ```

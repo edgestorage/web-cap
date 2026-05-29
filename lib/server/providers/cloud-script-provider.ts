@@ -1,12 +1,9 @@
 import type {
   ScriptDefinition,
-  ScriptSearchFilters,
-  ScriptSearchResult,
   CloudScriptRecord,
 } from '@shared/script-schema';
 import {
   scriptDefinitionSchema,
-  scriptSearchResultSchema,
   cloudScriptRecordSchema,
 } from '@shared/script-schema';
 import type { ScriptProvider } from './script-provider';
@@ -22,26 +19,6 @@ export class CloudScriptProvider implements ScriptProvider {
 
   constructor(private readonly options: CloudScriptProviderOptions = {}) {
     this.fallback = options.fallback ?? null;
-  }
-
-  async search(
-    query: string,
-    filters?: ScriptSearchFilters,
-  ): Promise<ScriptSearchResult[]> {
-    const response = await this.fetchJson<unknown>(
-      '/scripts/search',
-      new URLSearchParams({
-        query,
-        ...(filters?.type ? { type: filters.type } : {}),
-        ...(filters?.site ? { site: filters.site } : {}),
-      }),
-    );
-
-    if (!response) {
-      return this.fallback ? this.fallback.search(query, filters) : [];
-    }
-
-    return scriptSearchResultSchema.array().parse(response);
   }
 
   async getById(id: string, version?: string): Promise<ScriptDefinition | null> {

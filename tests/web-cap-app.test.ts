@@ -1,7 +1,7 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { WebSocket } from 'ws';
 import {
@@ -168,13 +168,6 @@ describe('WebCapAgentApp', () => {
         ),
       );
     });
-
-    const searchResults = await app.scriptSearch('fill input');
-    expect(searchResults[0]?.scriptId).toBe('cap_fill_input_with_text');
-
-    const script = await app.scriptGet('cap_fill_input_with_text');
-    expect(script.inputSchema.required).toEqual(['selector', 'value']);
-    expect(script.outputSchema.required).toEqual(['selector', 'value']);
 
     const execution = await app.scriptExecute({
       script: "(input) => cap.call('cap_fill_input_with_text', input)",
@@ -407,7 +400,8 @@ describe('WebCapAgentApp', () => {
       entries: Array<{
         localScriptId: string;
         status: string;
-        script: string;
+        script?: string;
+        scriptPath: string;
         execution?: { scriptId: string };
       }>;
     };
@@ -416,7 +410,11 @@ describe('WebCapAgentApp', () => {
     expect(history.entries).toHaveLength(1);
     expect(history.entries[0]?.localScriptId).toBe('temp.script.000001');
     expect(history.entries[0]?.status).toBe('succeeded');
+    expect(history.entries[0]?.script).toBeUndefined();
     expect(history.entries[0]?.execution?.scriptId).toBe('temp.script.000001');
+    await expect(readFile(history.entries[0]!.scriptPath, 'utf8')).resolves.toBe(
+      'export default async function (input) { return { echoed: input.text }; }',
+    );
   });
 
   it('does not add a temporary reuse notice when the same long script is executed again', async () => {
@@ -549,9 +547,6 @@ describe('WebCapAgentApp', () => {
       input: { text: 'hello' },
     });
 
-    const script = await app.scriptGet('temp.script.000001');
-    expect(script.scriptId).toBe('temp.script.000001');
-
     await app.scriptExecute({
       script: "export default async function (input) { return await cap.call('temp.script.000001', input); }",
       input: { text: 'again' },
@@ -603,7 +598,6 @@ describe('WebCapAgentApp', () => {
     });
 
     expect(seenRegistryIds[0]).not.toContain(failedEntry.localScriptId);
-    await expect(app.scriptGet(failedEntry.localScriptId)).rejects.toThrow(/was not found/i);
   });
 
   it('registers inline scripts as permanent ids when requested', async () => {
@@ -650,15 +644,12 @@ describe('WebCapAgentApp', () => {
       "Registered as permanent script local.script.000001. You can reuse it by calling cap.call('local.script.000001', xxx).",
     );
 
-    const registeredScript = await app.scriptGet('local.script.000001');
-    expect(registeredScript.scriptId).toBe('local.script.000001');
     const registry = await app.scriptRegistryList();
     expect(registry.find((script) => script.id === 'local.script.000001')?.script.timeoutMs).toBe(
       30_000,
     );
 
-    const searchResults = await app.scriptSearch('Temporary local script execution');
-    expect(searchResults.some((result) => result.scriptId === 'local.script.000001')).toBe(true);
+    expect(registry.some((script) => script.id === 'local.script.000001')).toBe(true);
   });
 
   it('does not register requested inline scripts when the result is missing ok', async () => {
@@ -699,11 +690,6 @@ describe('WebCapAgentApp', () => {
     expect(execution.notice).toBe(
       'Script local.script.000001 was not registered because register=true requires the execution result to include ok: true. It remains available temporarily as temp.script.000001.',
     );
-    await expect(app.scriptGet('local.script.000001')).rejects.toThrow(/was not found/i);
-    await expect(app.scriptGet('temp.script.000001')).resolves.toMatchObject({
-      scriptId: 'temp.script.000001',
-    });
-
     const registry = await app.scriptRegistryList();
     expect(registry.map((script) => script.id)).not.toContain('local.script.000001');
     expect(registry.map((script) => script.id)).not.toContain('temp.script.000001');
@@ -751,10 +737,9 @@ describe('WebCapAgentApp', () => {
     expect(execution.notice).toBe(
       'Script local.script.000001 was not registered because register=true requires the execution result to include ok: true. It remains available temporarily as temp.script.000001.',
     );
-    await expect(app.scriptGet('local.script.000001')).rejects.toThrow(/was not found/i);
-    await expect(app.scriptGet('temp.script.000001')).resolves.toMatchObject({
-      scriptId: 'temp.script.000001',
-    });
+    const registry = await app.scriptRegistryList();
+    expect(registry.map((script) => script.id)).not.toContain('local.script.000001');
+    expect(registry.map((script) => script.id)).not.toContain('temp.script.000001');
   });
 
   it('keeps successfully executed scripts temporary when provider registration fails', async () => {
@@ -796,10 +781,9 @@ describe('WebCapAgentApp', () => {
     expect(execution.notice).toBe(
       'Script local.script.000001 could not be registered: registry offline. It remains available temporarily as temp.script.000001.',
     );
-    await expect(app.scriptGet('local.script.000001')).rejects.toThrow(/was not found/i);
-    await expect(app.scriptGet('temp.script.000001')).resolves.toMatchObject({
-      scriptId: 'temp.script.000001',
-    });
+    const registry = await app.scriptRegistryList();
+    expect(registry.map((script) => script.id)).not.toContain('local.script.000001');
+    expect(registry.map((script) => script.id)).not.toContain('temp.script.000001');
   });
 
   it('records failed script executions in local history', async () => {
@@ -842,13 +826,19 @@ describe('WebCapAgentApp', () => {
       entries: Array<{
         localScriptId: string;
         status: string;
+        script?: string;
+        scriptPath: string;
         error?: { code?: string; message: string };
       }>;
     };
 
     expect(history.entries[0]?.localScriptId).toBe('temp.script.000001');
     expect(history.entries[0]?.status).toBe('failed');
+    expect(history.entries[0]?.script).toBeUndefined();
     expect(history.entries[0]?.error?.code).toBe('PAGE_MISMATCH');
+    await expect(readFile(history.entries[0]!.scriptPath, 'utf8')).resolves.toBe(
+      'export default async function () { return { ok: true }; }',
+    );
   });
 
   it('keeps only the most recent script history entries up to the configured limit', async () => {
@@ -869,6 +859,91 @@ describe('WebCapAgentApp', () => {
       'temp.script.000003',
       'temp.script.000002',
     ]);
+  });
+
+  it('migrates legacy inline script history to script files', async () => {
+    const legacyPath = join(tempDir, 'legacy-script-history.json');
+    await writeFile(
+      legacyPath,
+      `${JSON.stringify(
+        {
+          nextSequence: 2,
+          entries: [
+            {
+              localScriptId: 'temp.script.000001',
+              script: 'export default async function () {}',
+              input: {},
+              status: 'failed',
+              error: { message: 'boom' },
+              createdAt: '2026-01-01T00:00:00.000Z',
+              updatedAt: '2026-01-01T00:00:00.000Z',
+            },
+          ],
+        },
+        null,
+        2,
+      )}\n`,
+      'utf8',
+    );
+
+    const history = new ScriptExecutionHistory(legacyPath);
+
+    await expect(history.list()).resolves.toMatchObject([
+      {
+        localScriptId: 'temp.script.000001',
+        script: 'export default async function () {}',
+        status: 'failed',
+      },
+    ]);
+    const migratedRaw = await readFile(legacyPath, 'utf8');
+    expect(migratedRaw).not.toContain('"script": "export default async function () {}"');
+    await expect(
+      readFile(join(tempDir, 'legacy-script-history', 'scripts', 'temp.script.000001.js'), 'utf8'),
+    ).resolves.toBe('export default async function () {}');
+  });
+
+  it('removes inline scripts from mixed history index entries', async () => {
+    const historyPath = join(tempDir, 'mixed-script-history.json');
+    const scriptPath = join(tempDir, 'mixed-script-history', 'scripts', 'temp.script.000001.js');
+    await mkdir(dirname(scriptPath), { recursive: true });
+    await writeFile(
+      scriptPath,
+      'export default async function () { return { old: true }; }',
+      'utf8',
+    );
+    await writeFile(
+      historyPath,
+      `${JSON.stringify(
+        {
+          nextSequence: 2,
+          entries: [
+            {
+              localScriptId: 'temp.script.000001',
+              script: 'export default async function () { return { newer: true }; }',
+              scriptPath,
+              input: {},
+              status: 'running',
+              createdAt: '2026-01-01T00:00:00.000Z',
+              updatedAt: '2026-01-01T00:00:00.000Z',
+            },
+          ],
+        },
+        null,
+        2,
+      )}\n`,
+      'utf8',
+    );
+
+    const history = new ScriptExecutionHistory(historyPath);
+
+    await expect(history.list()).resolves.toMatchObject([
+      {
+        localScriptId: 'temp.script.000001',
+        script: 'export default async function () { return { old: true }; }',
+      },
+    ]);
+    const migratedRaw = await readFile(historyPath, 'utf8');
+    expect(migratedRaw).not.toContain('"script":');
   });
 
   it('lists recent script history entries through the app service', async () => {
@@ -1048,128 +1123,6 @@ describe('WebCapAgentApp', () => {
     ).rejects.toMatchObject({ code: 'INVALID_INPUT' });
   });
 
-  it('registers a script directly into the provider', async () => {
-    const script = scriptDefinitionSchema.parse({
-      id: 'cap_registered_script',
-      name: 'Registered Script',
-      version: '1.0.0',
-      status: 'active',
-      type: 'read',
-      summary: 'A directly registered script.',
-      target: {
-        site: 'generic-web',
-        urlPatterns: ['http://*', 'https://*'],
-        pageHints: [],
-      },
-      tags: ['registered'],
-      inputSchema: {
-        type: 'object',
-        properties: {},
-        required: [],
-        additionalProperties: false,
-      },
-      outputSchema: {
-        type: 'object',
-        properties: {
-          ok: { type: 'boolean' },
-        },
-        required: ['ok'],
-        additionalProperties: false,
-      },
-      script: {
-        timeoutMs: 5_000,
-        code: 'export default async function () { return { ok: true }; }',
-      },
-    });
-
-    const record = await app.scriptRegister(script);
-    expect(record.scriptDefinition.id).toBe('cap_registered_script');
-
-    const fetched = await app.scriptGet('cap_registered_script');
-    expect(fetched.scriptId).toBe('cap_registered_script');
-
-    const results = await app.scriptSearch('registered script');
-    expect(results.some((result) => result.scriptId === 'cap_registered_script')).toBe(true);
-  });
-
-  it('rejects direct script registration when output schema does not declare ok', async () => {
-    const script = scriptDefinitionSchema.parse({
-      id: 'cap_registered_script_without_ok',
-      name: 'Registered Script Without Ok',
-      version: '1.0.0',
-      status: 'active',
-      type: 'read',
-      summary: 'A directly registered script without the ok contract.',
-      target: {
-        site: 'generic-web',
-        urlPatterns: ['http://*', 'https://*'],
-        pageHints: [],
-      },
-      tags: ['registered'],
-      inputSchema: {
-        type: 'object',
-        properties: {},
-        required: [],
-        additionalProperties: false,
-      },
-      outputSchema: {
-        type: 'object',
-        properties: {
-          value: { type: 'string' },
-        },
-        required: ['value'],
-        additionalProperties: false,
-      },
-      script: {
-        timeoutMs: 5_000,
-        code: "export default async function () { return { value: 'done' }; }",
-      },
-    });
-
-    await expect(app.scriptRegister(script)).rejects.toThrow(
-      /outputSchema\.properties\.ok/i,
-    );
-  });
-
-  it('rejects direct script registration when ok is not required', async () => {
-    const script = scriptDefinitionSchema.parse({
-      id: 'cap_registered_script_optional_ok',
-      name: 'Registered Script Optional Ok',
-      version: '1.0.0',
-      status: 'active',
-      type: 'read',
-      summary: 'A directly registered script with optional ok.',
-      target: {
-        site: 'generic-web',
-        urlPatterns: ['http://*', 'https://*'],
-        pageHints: [],
-      },
-      tags: ['registered'],
-      inputSchema: {
-        type: 'object',
-        properties: {},
-        required: [],
-        additionalProperties: false,
-      },
-      outputSchema: {
-        type: 'object',
-        properties: {
-          ok: { type: 'boolean' },
-        },
-        required: [],
-        additionalProperties: false,
-      },
-      script: {
-        timeoutMs: 5_000,
-        code: 'export default async function () { return { ok: false }; }',
-      },
-    });
-
-    await expect(app.scriptRegister(script)).rejects.toThrow(
-      /outputSchema\.required/i,
-    );
-  });
-
   it('allows multiple MCP adapters to share one runtime daemon over RPC', async () => {
     await connectRuntime();
 
@@ -1184,11 +1137,11 @@ describe('WebCapAgentApp', () => {
       await secondAdapter.start();
 
       const status = await firstAdapter.sessionStatus();
-      const searchResults = await secondAdapter.scriptSearch('inspect page');
+      const secondStatus = await secondAdapter.sessionStatus();
 
       expect(status.connected).toBe(true);
       expect(status.activeTab?.url).toBe('https://example.com/form');
-      expect(searchResults.length).toBeGreaterThan(0);
+      expect(secondStatus.connected).toBe(true);
     } finally {
       await firstAdapter.close();
       await secondAdapter.close();
@@ -1204,7 +1157,9 @@ describe('WebCapAgentApp', () => {
     try {
       await adapter.start();
 
-      await expect(adapter.scriptSearch('')).rejects.toMatchObject({
+      await expect(
+        adapter.scriptExecute({ script: '', input: {}, options: { tabId: 101 } }),
+      ).rejects.toMatchObject({
         code: 'INVALID_INPUT',
       });
     } finally {
@@ -1217,12 +1172,6 @@ describe('WebCapAgentApp', () => {
     const rpcApp = {
       async start() {},
       async close() {},
-      async scriptSearch() {
-        return [];
-      },
-      async scriptGet() {
-        throw new Error('not used');
-      },
       async scriptExecute() {
         await new Promise((resolve) => setTimeout(resolve, 40));
         return {
@@ -1246,9 +1195,6 @@ describe('WebCapAgentApp', () => {
       },
       async scriptRegistryList() {
         return [];
-      },
-      async scriptRegister() {
-        throw new Error('not used');
       },
       async browserNewTab() {
         throw new Error('not used');
@@ -1441,10 +1387,7 @@ describe('WebCapAgentApp', () => {
       const secondRpcServer = new WebCapRpcServer(app, port);
       await secondRpcServer.start();
       try {
-        const searchResults = await adapter.scriptSearch('inspect page');
-        expect(
-          searchResults.some((result) => result.scriptId === 'cap_page_inspect_summary'),
-        ).toBe(true);
+        expect((await adapter.sessionStatus()).connected).toBe(true);
       } finally {
         await secondRpcServer.close();
       }
@@ -1830,14 +1773,12 @@ describe('WebCapAgentApp', () => {
       const scriptFile = join(stateDir, 'scripts', 'generic-web', 'persisted.script.js');
       const indexFile = join(stateDir, 'script-registry.sqlite');
       const scriptSource = await readFile(scriptFile, 'utf8');
-      const searchResults = await provider.search('persisted', { site: 'generic-web' });
 
       expect(builtin?.id).toBe('builtin.page.inspect');
       expect(persisted?.id).toBe('persisted.script');
       expect(scriptSource).toContain('web-cap-script');
       expect(scriptSource).toContain('"lastExecutedPage": null');
       expect(await readFile(indexFile)).toBeInstanceOf(Buffer);
-      expect(searchResults.some((result) => result.scriptId === 'persisted.script')).toBe(true);
 
       await provider.saveRecord(
         {
@@ -1882,11 +1823,10 @@ describe('WebCapAgentApp', () => {
         join(stateDir, 'scripts', 'example.com', 'url.script.js'),
         'utf8',
       );
-      const urlScriptSearchResults = await provider.search('url', { site: 'generic-web' });
 
       expect(urlScriptSource).toContain('"lastExecutedPage": "https://example.com/form"');
       expect(urlScriptSource).toContain('"site": "generic-web"');
-      expect(urlScriptSearchResults.some((result) => result.scriptId === 'url.script')).toBe(true);
+      expect((await provider.getById('url.script'))?.id).toBe('url.script');
 
       await removeFileWithRetries(indexFile);
       await removeFileWithRetries(`${indexFile}-wal`);

@@ -1,7 +1,5 @@
 import type {
   ScriptDefinition,
-  ScriptSearchFilters,
-  ScriptSearchResult,
   CloudScriptRecord,
 } from '@shared/script-schema';
 import type { ScriptProvider, ScriptSaveContext } from './script-provider';
@@ -18,31 +16,6 @@ export class CompositeScriptProvider implements ScriptProvider {
   constructor(options: CompositeScriptProviderOptions) {
     this.providers = options.providers;
     this.writableProviders = options.writableProviders ?? options.providers;
-  }
-
-  async search(
-    query: string,
-    filters?: ScriptSearchFilters,
-  ): Promise<ScriptSearchResult[]> {
-    const settled = await Promise.allSettled(
-      this.providers.map((provider) => provider.search(query, filters)),
-    );
-
-    const merged = new Map<string, ScriptSearchResult>();
-    for (const result of settled) {
-      if (result.status !== 'fulfilled') {
-        continue;
-      }
-
-      for (const item of result.value) {
-        const previous = merged.get(item.scriptId);
-        if (!previous || item.score > previous.score) {
-          merged.set(item.scriptId, item);
-        }
-      }
-    }
-
-    return [...merged.values()].sort((left, right) => right.score - left.score);
   }
 
   async getById(id: string, version?: string): Promise<ScriptDefinition | null> {

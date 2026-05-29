@@ -1,7 +1,6 @@
 import { readFile } from 'node:fs/promises';
-import { Command, InvalidArgumentError, Option } from 'commander';
+import { Command, InvalidArgumentError } from 'commander';
 import type { ExecuteScriptRequest } from './server/agent/contracts';
-import type { ScriptSearchFilters } from '@shared/script-schema';
 import { formatError } from './daemon-bootstrap';
 import type { WebCapConfigKey, WebCapEvidenceConfig } from './config';
 
@@ -18,22 +17,6 @@ export interface ScriptExecuteCliOptions {
 
 export interface JsonOutputCliOptions {
   pretty?: boolean;
-}
-
-export interface ScriptSearchCliOptions extends JsonOutputCliOptions {
-  query: string;
-  type?: ScriptSearchFilters['type'];
-  site?: string;
-}
-
-export interface ScriptGetCliOptions extends JsonOutputCliOptions {
-  scriptId: string;
-  version?: string;
-}
-
-export interface ScriptRegisterCliOptions extends JsonOutputCliOptions {
-  definition?: string;
-  definitionFile?: string;
 }
 
 export interface BrowserNewTabCliOptions extends JsonOutputCliOptions {
@@ -58,10 +41,7 @@ export type CliCommand =
   | { name: 'mcp' }
   | { name: 'config'; options: ConfigCliOptions }
   | { name: 'session-status'; options: JsonOutputCliOptions }
-  | { name: 'script-search'; options: ScriptSearchCliOptions }
-  | { name: 'script-get'; options: ScriptGetCliOptions }
   | { name: 'script-execute'; options: ScriptExecuteCliOptions }
-  | { name: 'script-register'; options: ScriptRegisterCliOptions }
   | { name: 'browser-new-tab'; options: BrowserNewTabCliOptions }
   | { name: 'wait-events'; options: WaitEventsCliOptions };
 
@@ -88,14 +68,8 @@ export function parseCliArgs(argv: string[]): CliCommand {
       return parseConfigArgs(args);
     case 'session-status':
       return parseSessionStatusArgs(args);
-    case 'script-search':
-      return parseScriptSearchArgs(args);
-    case 'script-get':
-      return parseScriptGetArgs(args);
     case 'script-execute':
       return parseScriptExecuteArgs(args);
-    case 'script-register':
-      return parseScriptRegisterArgs(args);
     case 'browser-new-tab':
       return parseBrowserNewTabArgs(args);
     case 'wait-events':
@@ -159,23 +133,6 @@ export async function buildScriptExecuteRequest(
   }
 
   return request;
-}
-
-export async function buildScriptRegisterRequest(
-  options: ScriptRegisterCliOptions,
-): Promise<Record<string, unknown>> {
-  if (options.definition && options.definitionFile) {
-    throw new Error('Use either --definition or --definition-file, not both.');
-  }
-
-  const definitionRaw =
-    options.definition ??
-    (options.definitionFile ? await readFile(options.definitionFile, 'utf8') : undefined);
-  if (!definitionRaw || definitionRaw.trim().length === 0) {
-    throw new Error('script-register requires --definition or --definition-file.');
-  }
-
-  return parseJsonObject(definitionRaw, 'definition');
 }
 
 export function usage(): string {
@@ -268,48 +225,6 @@ function parseSessionStatusArgs(args: string[]): CliCommand {
   return options === 'help' ? helpForCommand(command) : { name: 'session-status', options };
 }
 
-function parseScriptSearchArgs(args: string[]): CliCommand {
-  const command = createScriptSearchParser();
-  const result = parseCommander<Omit<ScriptSearchCliOptions, 'query'> & { query?: string }>(
-    command,
-    args,
-  );
-  if (result === 'help') {
-    return helpForCommand(command);
-  }
-
-  const query = result.query ?? command.args[0];
-  if (!query) {
-    throw new Error('script-search requires a query argument or --query value.');
-  }
-
-  return { name: 'script-search', options: { ...result, query } };
-}
-
-function parseScriptGetArgs(args: string[]): CliCommand {
-  const command = createScriptGetParser();
-  const result = parseCommander<Omit<ScriptGetCliOptions, 'scriptId'> & { scriptId?: string }>(
-    command,
-    args,
-  );
-  if (result === 'help') {
-    return helpForCommand(command);
-  }
-
-  const scriptId = result.scriptId ?? command.args[0];
-  if (!scriptId) {
-    throw new Error('script-get requires a script id argument or --script-id value.');
-  }
-
-  return { name: 'script-get', options: { ...result, scriptId } };
-}
-
-function parseScriptRegisterArgs(args: string[]): CliCommand {
-  const command = createScriptRegisterParser();
-  const options = parseCommander<ScriptRegisterCliOptions>(command, args);
-  return options === 'help' ? helpForCommand(command) : { name: 'script-register', options };
-}
-
 function parseBrowserNewTabArgs(args: string[]): CliCommand {
   const command = createBrowserNewTabParser();
   const options = parseCommander<BrowserNewTabCliOptions>(command, args);
@@ -376,14 +291,8 @@ function createCommandParser(commandName: CliCommandName): Command {
       return createConfigParser();
     case 'session-status':
       return createSessionStatusParser();
-    case 'script-search':
-      return createScriptSearchParser();
-    case 'script-get':
-      return createScriptGetParser();
     case 'script-execute':
       return createScriptExecuteParser();
-    case 'script-register':
-      return createScriptRegisterParser();
     case 'browser-new-tab':
       return createBrowserNewTabParser();
     case 'wait-events':
@@ -397,10 +306,7 @@ function cliCommandNames(): CliCommandName[] {
     'mcp',
     'config',
     'session-status',
-    'script-search',
-    'script-get',
     'script-execute',
-    'script-register',
     'browser-new-tab',
     'wait-events',
   ];
@@ -434,25 +340,6 @@ function createSessionStatusParser(): Command {
   );
 }
 
-function createScriptSearchParser(): Command {
-  return createJsonOutputParser('script-search')
-    .description('Search built-in and locally registered reusable scripts.')
-    .argument('[query]')
-    .option('--query <query>', 'Search query for reusable browser capabilities.')
-    .addOption(
-      new Option('--type <type>', 'Filter by script type: read or act.').choices(['read', 'act']),
-    )
-    .option('--site <site>', 'Filter results to scripts related to a site or domain.');
-}
-
-function createScriptGetParser(): Command {
-  return createJsonOutputParser('script-get')
-    .description('Print one script definition and its callable schema summary.')
-    .argument('[script-id]')
-    .option('--script-id <scriptId>', 'Script id to inspect.')
-    .option('--version <version>', 'Script version to inspect.');
-}
-
 function createScriptExecuteParser(): Command {
   return createParser('script-execute')
     .description(
@@ -466,13 +353,6 @@ function createScriptExecuteParser(): Command {
     .option('--timeout-ms <ms>', 'Execution timeout in milliseconds.', parseIntegerOption)
     .option('--register', 'Save the script for reuse only if it returns ok: true.')
     .option('--pretty', 'Print formatted JSON output.');
-}
-
-function createScriptRegisterParser(): Command {
-  return createJsonOutputParser('script-register')
-    .description('Register a reusable script definition without running it.')
-    .option('--definition <json>', 'JSON script definition to register.')
-    .option('--definition-file <path>', 'Read JSON script definition from a file.');
 }
 
 function createBrowserNewTabParser(): Command {

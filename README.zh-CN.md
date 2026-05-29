@@ -122,36 +122,20 @@ pnpm dev:firefox
 
 ```bash
 pnpm cli session-status
-pnpm cli script-search "inspect page" --type read --site generic-web
-pnpm cli script-get builtin.page.inspect
 ```
 
 典型 agent 流程是：
 
-1. 用 `script-search` 查找可复用脚本。
-2. 用 `script-get` 查看脚本输入输出 schema。
-3. 用 `script-execute` 在已连接的浏览器中执行脚本。
-4. 需要复用时，用 `script-register` 注册脚本。
+1. 用 `script-execute` 在已连接的浏览器中执行脚本代码。
+2. 内联脚本执行成功后需要复用时，在 `script-execute` 中加 `--register`。
 
 ## CLI 命令
-
-### `script-search`
-
-搜索可调用的内置脚本和本地已注册脚本。建议先搜索再执行，因为复用脚本通常更快、更稳定。
-
-### `script-get`
-
-读取某个脚本定义，并返回可调用的 schema 摘要，包括 `scriptId`、`name`、`description`、`inputSchema` 和 `outputSchema`。
 
 ### `script-execute`
 
 在选定的浏览器标签页中执行脚本。脚本接收一个对象参数，并返回一个 JSON 对象。
 
-`script-execute` 支持 `--timeout-ms`、`--script-file`、`--input-file` 等可选执行配置。脚本执行期间，可以通过 `cap.call(scriptId, input)` 调用其他脚本。
-
-### `script-register`
-
-注册可复用脚本定义，包括元信息、输入 JSON schema、输出 JSON schema 和脚本函数代码。输出 schema 必须声明 `ok` 字段，并把 `ok` 放入 `required`。
+`script-execute` 支持 `--timeout-ms`、`--script-file`、`--input-file`、`--register` 等可选执行配置。脚本执行期间，可以通过 `cap.call(scriptId, input)` 调用其他脚本。`--register` 只会在执行成功且结果包含 `ok: true` 时保存内联脚本。
 
 ### 浏览器命令
 
@@ -205,6 +189,7 @@ pnpm cli script-execute \
 
 ```bash
 pnpm cli script-execute \
+  --tab-id 1 \
   --script-file ./script.js \
   --input-file ./input.json
 ```
@@ -213,9 +198,7 @@ pnpm cli script-execute \
 
 ```bash
 pnpm cli session-status
-pnpm cli script-search "inspect page" --type read --site generic-web
-pnpm cli script-get builtin.page.inspect
-pnpm cli script-register --definition-file ./script-definition.json
+pnpm cli script-execute --tab-id 1 --script-file ./script.js --input-file ./input.json --register
 pnpm cli browser-new-tab --url https://example.com --active true
 pnpm cli wait-events --duration-ms 10000
 ```
