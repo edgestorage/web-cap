@@ -648,7 +648,7 @@ function inferExecutionStatus(evidence: ExecutionEvidence): 'succeeded' | 'inter
 
 function summarizeExecutionEvidence(evidence: ExecutionEvidence): ExecutionEvidence {
   const summarized: ExecutionEvidence = {
-    events: evidence.events,
+    events: summarizeExecutionEvents(evidence.events),
   };
 
   if (evidence.screenshots?.length) {
@@ -660,6 +660,86 @@ function summarizeExecutionEvidence(evidence: ExecutionEvidence): ExecutionEvide
   }
 
   return summarized;
+}
+
+function summarizeExecutionEvents(
+  events: ExecutionEvidence['events'],
+): ExecutionEvidence['events'] {
+  const summarized: ExecutionEvidence['events'] = [];
+  let pendingMove: ExecutionEvidence['events'][number] | undefined;
+  let pendingMoveStartPoint: { x: number; y: number } | undefined;
+  let pendingMoveCount = 0;
+
+  const flushPendingMove = () => {
+    if (!pendingMove) {
+      return;
+    }
+
+    if (pendingMoveCount <= 1) {
+      summarized.push(pendingMove);
+      pendingMove = undefined;
+      pendingMoveStartPoint = undefined;
+      pendingMoveCount = 0;
+      return;
+    }
+
+    const value = isRecord(pendingMove.value) ? { ...pendingMove.value } : {};
+    const lastPoint = readEvidencePoint(value);
+    value.action = 'move';
+    value.count = pendingMoveCount;
+    if (pendingMoveStartPoint) {
+      value.from = pendingMoveStartPoint;
+    }
+    if (lastPoint) {
+      value.to = lastPoint;
+    }
+
+    summarized.push({
+      type: pendingMove.type,
+      value,
+    });
+    pendingMove = undefined;
+    pendingMoveStartPoint = undefined;
+    pendingMoveCount = 0;
+  };
+
+  for (const event of events) {
+    if (isManagedMouseMoveEvent(event)) {
+      pendingMoveStartPoint ??= readEvidencePoint(event.value);
+      pendingMove = event;
+      pendingMoveCount += 1;
+      continue;
+    }
+
+    flushPendingMove();
+    summarized.push(event);
+  }
+
+  flushPendingMove();
+  return summarized;
+}
+
+function isManagedMouseMoveEvent(event: ExecutionEvidence['events'][number]): boolean {
+  return event.type === 'managed_mouse' && isRecord(event.value) && event.value.action === 'move';
+}
+
+function readEvidencePoint(value: unknown): { x: number; y: number } | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const point = isRecord(value.point) ? value.point : value;
+  const x = typeof point.x === 'number' ? point.x : undefined;
+  const y = typeof point.y === 'number' ? point.y : undefined;
+  if (x === undefined || y === undefined) {
+    return undefined;
+  }
+
+  return { x: Math.round(x), y: Math.round(y) };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
 function hasVisibleElementChanges(

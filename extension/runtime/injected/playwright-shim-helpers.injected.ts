@@ -1,5 +1,22 @@
 /* eslint-disable */
+import { Ivya } from 'ivya';
 import type { LocatorQuery, PlaywrightShimDeps } from './playwright-shim-types.injected';
+
+const ivyaBrowser = /\bFirefox\//.test(globalThis.navigator?.userAgent ?? '')
+  ? 'firefox'
+  : /\bSafari\//.test(globalThis.navigator?.userAgent ?? '') && !/\bChrome\//.test(globalThis.navigator?.userAgent ?? '')
+    ? 'webkit'
+    : 'chromium';
+
+const ivya = Ivya.create({
+  browser: ivyaBrowser,
+  testIdAttribute: 'data-testid',
+  exact: false,
+});
+
+export function queryLocatorSelectorAll(selector: string, root: Node = document.documentElement): Element[] {
+  return ivya.queryLocatorSelectorAll(selector, root);
+}
 
 export function notImplemented(apiName: string) {
   return () => {

@@ -53,6 +53,7 @@
     "better-sqlite3": "^12.10.0",
     "commander": "^14.0.3",
     "diff-dom": "^5.2.1",
+    "ivya": "1.8.2",
     "tinyglobby": "^0.2.16",
     "vue": "^3.5.22",
     "ws": "^8.20.0",

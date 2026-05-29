@@ -103,7 +103,6 @@ describe('execution helpers', () => {
     expect(scriptRuntimeSource).toContain('managed_mouse');
     expect(scriptRuntimeSource).toContain('function installManagedClickHook(');
     expect(scriptRuntimeSource).toContain('async waitForManagedInput()');
-    expect(scriptRuntimeSource).toContain('function managedMouseDispatch(');
     expect(scriptRuntimeSource).toContain('function installManagedKeyboardDispatchHook()');
     expect(scriptRuntimeSource).not.toContain('__name');
     expect(scriptRuntimeSource).not.toContain('import_');
@@ -161,6 +160,33 @@ describe('execution helpers', () => {
       input: { value: number },
     ) => Promise<{ value: number }>;
     await expect(bodyFunction({ value: 7 })).resolves.toEqual({ value: 7 });
+
+    const commentedExportDefault = eval(
+      scriptToFunctionExpression(`
+// Leading comments should not hide export default.
+/* Block comments should not hide it either. */
+export default function () {
+  return { ok: true };
+}
+      `),
+    ) as () => Promise<{ ok: boolean }>;
+    await expect(commentedExportDefault()).resolves.toEqual({ ok: true });
+
+    const commentedExportDefaultArrow = eval(
+      scriptToFunctionExpression(`
+// Leading comments should also work for export assignments.
+export default () => ({ ok: true });
+      `),
+    ) as () => Promise<{ ok: boolean }>;
+    await expect(commentedExportDefaultArrow()).resolves.toEqual({ ok: true });
+
+    const parenthesizedExportDefaultArrow = eval(
+      scriptToFunctionExpression(`
+// Parenthesized arrows should still become executable script functions.
+export default (() => ({ ok: true }));
+      `),
+    ) as () => Promise<{ ok: boolean }>;
+    await expect(parenthesizedExportDefaultArrow()).resolves.toEqual({ ok: true });
   });
 
   it('inserts a managed input barrier after generated managed input statements', () => {

@@ -28,37 +28,133 @@ export function scriptToFunctionExpression(code: string): string {
   const trimmed = rewriteTimerCallsToScopedTimers(
     insertManagedInputWaitAfterManagedInputStatements(code.trim()),
   );
-  if (trimmed.startsWith('export default')) {
-    return `(${ensureAsyncFunctionExpression(trimmed.replace(/^export\s+default\s+/, ''))})`;
+  const defaultExportSource = readDefaultExportSource(trimmed);
+  if (defaultExportSource) {
+    return `(${ensureAsyncFunctionSource(defaultExportSource)})`;
   }
-  if (looksLikeFunctionExpression(trimmed)) {
-    return `(${ensureAsyncFunctionExpression(trimmed)})`;
+  const topLevelFunctionSource = readTopLevelFunctionSource(trimmed);
+  if (topLevelFunctionSource) {
+    return `(${ensureAsyncFunctionSource(topLevelFunctionSource)})`;
   }
   return `(async function (input) {\n${trimmed}\n})`;
 }
 
-function looksLikeFunctionExpression(code: string): boolean {
-  return (
-    /^(?:async\s+)?function(?:\s+[\w$]+)?\s*\(/.test(code) ||
-    /^(?:async\s*)?\([^)]*\)\s*=>/.test(code) ||
-    /^(?:async\s+)?[\w$]+\s*=>/.test(code)
+interface FunctionSource {
+  source: string;
+  needsAsync: boolean;
+}
+
+function readDefaultExportSource(code: string): FunctionSource | undefined {
+  const sourceFile = ts.createSourceFile(
+    'web-cap-script.js',
+    code,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.JS,
+  );
+  const firstStatement = sourceFile.statements[0];
+  if (!firstStatement) {
+    return undefined;
+  }
+
+  if (ts.isExportAssignment(firstStatement)) {
+    const expression = skipExpressionParens(firstStatement.expression);
+    const source = expression.getText(sourceFile);
+    if (!isFunctionLikeExpression(expression) || hasAsyncModifier(expression)) {
+      return { source, needsAsync: false };
+    }
+
+    return {
+      source,
+      needsAsync: true,
+    };
+  }
+
+  if (
+    ts.isFunctionDeclaration(firstStatement) &&
+    hasModifier(firstStatement, ts.SyntaxKind.ExportKeyword) &&
+    hasModifier(firstStatement, ts.SyntaxKind.DefaultKeyword)
+  ) {
+    const defaultModifier = (ts.getModifiers(firstStatement) ?? []).find(
+      (modifier) => modifier.kind === ts.SyntaxKind.DefaultKeyword,
+    );
+    if (!defaultModifier) {
+      return undefined;
+    }
+
+    const sourceStart = skipWhitespace(code, defaultModifier.end);
+    return {
+      source: code.slice(sourceStart),
+      needsAsync: !hasAsyncModifier(firstStatement),
+    };
+  }
+
+  return undefined;
+}
+
+function readTopLevelFunctionSource(code: string): FunctionSource | undefined {
+  const sourceFile = ts.createSourceFile(
+    'web-cap-script.js',
+    code,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.JS,
+  );
+  const firstStatement = sourceFile.statements[0];
+  if (!firstStatement) {
+    return undefined;
+  }
+
+  if (ts.isFunctionDeclaration(firstStatement)) {
+    const sourceStart = firstStatement.getStart(sourceFile);
+    return {
+      source: code.slice(sourceStart),
+      needsAsync: !hasAsyncModifier(firstStatement),
+    };
+  }
+
+  if (!ts.isExpressionStatement(firstStatement)) {
+    return undefined;
+  }
+
+  const expression = skipExpressionParens(firstStatement.expression);
+  if (!isFunctionLikeExpression(expression)) {
+    return undefined;
+  }
+
+  return {
+    source: expression.getText(sourceFile),
+    needsAsync: !hasAsyncModifier(expression),
+  };
+}
+
+function hasModifier(node: ts.Node, kind: ts.SyntaxKind): boolean {
+  return Boolean(
+    ts.canHaveModifiers(node) &&
+      ts.getModifiers(node)?.some((modifier) => modifier.kind === kind),
   );
 }
 
-function ensureAsyncFunctionExpression(code: string): string {
-  if (/^async\b/.test(code)) {
-    return code;
+function isFunctionLikeExpression(
+  node: ts.Node,
+): node is ts.FunctionExpression | ts.ArrowFunction {
+  return ts.isFunctionExpression(node) || ts.isArrowFunction(node);
+}
+
+function ensureAsyncFunctionSource(input: FunctionSource): string {
+  if (!input.needsAsync) {
+    return input.source;
   }
 
-  if (/^function\b/.test(code)) {
-    return `async ${code}`;
-  }
+  return `async ${input.source}`;
+}
 
-  if (/^\([^)]*\)\s*=>/.test(code) || /^[\w$]+\s*=>/.test(code)) {
-    return `async ${code}`;
+function skipWhitespace(code: string, position: number): number {
+  let index = position;
+  while (/\s/.test(code[index] ?? '')) {
+    index += 1;
   }
-
-  return code;
+  return index;
 }
 
 function insertManagedInputWaitAfterManagedInputStatements(code: string): string {

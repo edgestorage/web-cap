@@ -199,6 +199,54 @@ describe('WebCapAgentApp', () => {
     });
   });
 
+  it('summarizes consecutive managed mouse move evidence', async () => {
+    await connectRuntime((envelope) => {
+      if (envelope.type !== 'execute_script') {
+        return;
+      }
+
+      client?.send(
+        JSON.stringify(
+          createRuntimeEnvelope(
+            'execution_result',
+            {
+              result: { ok: true },
+              evidence: {
+                events: [
+                  { type: 'managed_mouse', value: { action: 'move', point: { x: 10, y: 20 } } },
+                  { type: 'managed_mouse', value: { action: 'move', point: { x: 15, y: 25 } } },
+                  { type: 'managed_mouse', value: { action: 'move', point: { x: 30, y: 40 } } },
+                  { type: 'managed_mouse', value: { action: 'down', x: 30, y: 40 } },
+                ],
+              },
+            },
+            { sessionId: 'runtime-session', requestId: envelope.requestId },
+          ),
+        ),
+      );
+    });
+
+    const execution = await app.scriptExecute({
+      script: '() => ({ ok: true })',
+      input: {},
+      options: { tabId: 101 },
+    });
+
+    expect(execution.evidence.events).toEqual([
+      {
+        type: 'managed_mouse',
+        value: {
+          action: 'move',
+          point: { x: 30, y: 40 },
+          count: 3,
+          from: { x: 10, y: 20 },
+          to: { x: 30, y: 40 },
+        },
+      },
+      { type: 'managed_mouse', value: { action: 'down', x: 30, y: 40 } },
+    ]);
+  });
+
   it('executes script wrappers and passes the registry to the runtime', async () => {
     await connectRuntime((envelope) => {
       if (envelope.type !== 'execute_script') {
