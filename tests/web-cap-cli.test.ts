@@ -1,4 +1,4 @@
-import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -111,11 +111,27 @@ describe('WEB_CAP CLI', () => {
       buildScriptExecuteRequest({
         scriptFile,
         inputFile,
+        tabId: 42,
       }),
     ).resolves.toEqual({
       script: 'export default async function () { return { ok: true }; }',
       input: { ok: true },
+      options: {
+        tabId: 42,
+      },
     });
+  });
+
+  it('requires a tab id for script execution', async () => {
+    expect(() =>
+      parseCliArgs(['script-execute', '--script', 'export default async function () {}']),
+    ).toThrow(/--tab-id/);
+
+    await expect(
+      buildScriptExecuteRequest({
+        script: 'export default async function () {}',
+      }),
+    ).rejects.toThrow(/--tab-id/);
   });
 
   it('parses wait-events arguments', () => {
@@ -129,6 +145,9 @@ describe('WEB_CAP CLI', () => {
   });
 
   it('parses MCP-equivalent utility commands', () => {
+    expect(parseCliArgs(['version'])).toEqual({ name: 'version' });
+    expect(parseCliArgs(['--version'])).toEqual({ name: 'version' });
+    expect(parseCliArgs(['-V'])).toEqual({ name: 'version' });
     expect(parseCliArgs(['mcp'])).toEqual({ name: 'mcp' });
     expect(parseCliArgs(['session-status', '--pretty'])).toEqual({
       name: 'session-status',
@@ -202,13 +221,14 @@ describe('WEB_CAP CLI', () => {
     expect(stdout).toContain('Commands:');
     expect(stdout).toContain('script-execute');
     expect(stdout).toContain('Script execution:');
-    expect(stdout).toContain('web-cap script-execute --script <code>');
+    expect(stdout).toContain('web-cap script-execute --tab-id <id> --script <code>');
     expect(stdout).toContain('Runs JavaScript in the selected browser tab.');
     expect(stdout).toContain('use cap.call(...) inside the script');
     expect(stdout).toContain('Playwright-style page API as global page and cap.page');
     expect(stdout).toContain("await page.getByRole('button', { name: 'Login' }).click();");
     expect(stdout).toContain("await page.locator('input[name=email]').fill(input.email);");
     expect(stdout).toContain('--script-file <path>');
+    expect(stdout).toContain('--tab-id <id>');
     expect(stdout).toContain('--timeout-ms <ms>');
     expect(stdout).not.toContain('--definition-file');
     expect(stdout).not.toContain('--active <true|false>');
@@ -452,6 +472,29 @@ describe('WEB_CAP CLI', () => {
     expect(runMcp).toHaveBeenCalledTimes(1);
   });
 
+  it('prints the package version without connecting to the daemon', async () => {
+    const packageJson = JSON.parse(await readFile(join(process.cwd(), 'package.json'), 'utf8')) as {
+      version: string;
+    };
+    const connect = vi.fn();
+    let stdout = '';
+    let stderr = '';
+
+    const code = await runCli(
+      ['version'],
+      {
+        stdout: { write: (chunk: string) => { stdout += chunk; return true; } },
+        stderr: { write: (chunk: string) => { stderr += chunk; return true; } },
+      },
+      connect,
+    );
+
+    expect(code).toBe(0);
+    expect(stdout).toBe(`${packageJson.version}\n`);
+    expect(stderr).toBe('');
+    expect(connect).not.toHaveBeenCalled();
+  });
+
   it('executes through the injected service and prints JSON', async () => {
     const calls: ExecuteScriptRequest[] = [];
     const service = {
@@ -514,6 +557,8 @@ describe('WEB_CAP CLI', () => {
         'export default async function () { return { ok: true }; }',
         '--input',
         '{"x":1}',
+        '--tab-id',
+        '1',
       ],
       {
         stdout: { write: (chunk: string) => { stdout += chunk; return true; } },
@@ -616,6 +661,8 @@ describe('WEB_CAP CLI', () => {
         'script-execute',
         '--script',
         'export default async function () { return { ok: true }; }',
+        '--tab-id',
+        '9',
       ],
       {
         stdout: { write: (chunk: string) => { stdout += chunk; return true; } },
@@ -631,6 +678,7 @@ describe('WEB_CAP CLI', () => {
         script: 'export default async function () { return { ok: true }; }',
         input: {},
         options: {
+          tabId: 9,
           activateTab: true,
           evidence: ['events', 'visibleElements'],
         },
@@ -732,7 +780,7 @@ describe('WEB_CAP CLI', () => {
     const connect = vi.fn();
     let stderr = '';
     const code = await runCli(
-      ['script-execute', '--script', 'export default async function () {}', '--input', '[]'],
+      ['script-execute', '--script', 'export default async function () {}', '--tab-id', '1', '--input', '[]'],
       {
         stdout: { write: () => true },
         stderr: { write: (chunk: string) => { stderr += chunk; return true; } },

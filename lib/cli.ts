@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
-import { realpathSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   buildScriptExecuteRequest,
@@ -36,6 +37,10 @@ export async function runCli(
     const command = parseCliArgs(argv);
     if (command.name === 'help') {
       io.stdout.write(`${command.text}\n`);
+      return 0;
+    }
+    if (command.name === 'version') {
+      io.stdout.write(`${readPackageVersion()}\n`);
       return 0;
     }
     if (command.name === 'mcp') {
@@ -231,6 +236,16 @@ function formatCliError(error: unknown): string {
 
 function writeJson(io: CliIo, value: unknown, options: JsonOutputCliOptions): void {
   io.stdout.write(`${JSON.stringify(value, null, options.pretty ? 2 : 0)}\n`);
+}
+
+function readPackageVersion(): string {
+  const packageJsonPath = join(dirname(fileURLToPath(import.meta.url)), '..', 'package.json');
+  const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf8')) as { version?: unknown };
+  if (typeof packageJson.version !== 'string' || packageJson.version.trim().length === 0) {
+    throw new Error('Package version is unavailable.');
+  }
+
+  return packageJson.version;
 }
 
 if (isDirectEntryPoint(import.meta.url, process.argv[1])) {

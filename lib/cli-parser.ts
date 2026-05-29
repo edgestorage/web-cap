@@ -54,6 +54,7 @@ export interface ConfigCliOptions extends JsonOutputCliOptions {
 
 export type CliCommand =
   | { name: 'help'; text: string }
+  | { name: 'version' }
   | { name: 'mcp' }
   | { name: 'config'; options: ConfigCliOptions }
   | { name: 'session-status'; options: JsonOutputCliOptions }
@@ -71,11 +72,16 @@ export function parseCliArgs(argv: string[]): CliCommand {
   if (!commandName || commandName === '--help' || commandName === '-h') {
     return { name: 'help', text: usage() };
   }
+  if (commandName === '--version' || commandName === '-V') {
+    return { name: 'version' };
+  }
   if (commandName === 'help') {
     return parseHelpArgs(args);
   }
 
   switch (commandName) {
+    case 'version':
+      return parseVersionArgs(args);
     case 'mcp':
       return parseMcpArgs(args);
     case 'config':
@@ -129,24 +135,24 @@ export async function buildScriptExecuteRequest(
   if (!script || script.trim().length === 0) {
     throw new Error('script-execute requires --script or --script-file.');
   }
+  if (options.tabId === undefined) {
+    throw new Error('script-execute requires --tab-id.');
+  }
 
   const inputRaw =
     options.input ?? (options.inputFile ? await readFile(options.inputFile, 'utf8') : '{}');
   const input = parseJsonObject(inputRaw, 'input');
+  const executionOptions: NonNullable<ExecuteScriptRequest['options']> = {
+    tabId: options.tabId,
+  };
   const request: ExecuteScriptRequest = {
     script,
     input,
+    options: executionOptions,
   };
 
-  const executionOptions: ExecuteScriptRequest['options'] = {};
-  if (options.tabId !== undefined) {
-    executionOptions.tabId = options.tabId;
-  }
   if (options.timeoutMs !== undefined) {
     executionOptions.timeoutMs = options.timeoutMs;
-  }
-  if (Object.keys(executionOptions).length > 0) {
-    request.options = executionOptions;
   }
   if (options.register === true) {
     request.register = true;
@@ -183,6 +189,14 @@ function parseMcpArgs(args: string[]): CliCommand {
     return helpForCommand(command);
   }
   return { name: 'mcp' };
+}
+
+function parseVersionArgs(args: string[]): CliCommand {
+  const command = createVersionParser();
+  if (parseCommander(command, args) === 'help') {
+    return helpForCommand(command);
+  }
+  return { name: 'version' };
 }
 
 function parseConfigArgs(args: string[]): CliCommand {
@@ -239,7 +253,13 @@ function parseConfigArgs(args: string[]): CliCommand {
 function parseScriptExecuteArgs(args: string[]): CliCommand {
   const command = createScriptExecuteParser();
   const options = parseCommander<ScriptExecuteCliOptions>(command, args);
-  return options === 'help' ? helpForCommand(command) : { name: 'script-execute', options };
+  if (options === 'help') {
+    return helpForCommand(command);
+  }
+  if (options.tabId === undefined) {
+    throw new Error('script-execute requires --tab-id.');
+  }
+  return { name: 'script-execute', options };
 }
 
 function parseSessionStatusArgs(args: string[]): CliCommand {
@@ -316,8 +336,8 @@ function createRootHelpParser(): Command {
 
 function scriptExecutionHelp(): string {
   return `Script execution:
-  web-cap script-execute --script <code> [--input <json>] [--tab-id <id>] [--timeout-ms <ms>] [--register]
-  web-cap script-execute --script-file <path> [--input-file <path>] [--pretty]
+  web-cap script-execute --tab-id <id> --script <code> [--input <json>] [--timeout-ms <ms>] [--register]
+  web-cap script-execute --tab-id <id> --script-file <path> [--input-file <path>] [--pretty]
 
   Runs JavaScript in the selected browser tab. Scripts receive one JSON object,
   return one JSON object, and can use cap.call(...) inside the script to call
@@ -330,7 +350,7 @@ ${scriptRuntimeApiHelp('  ')}
   --script-file <path>  Read script source code from a file.
   --input <json>        JSON object passed to the script. Defaults to {}.
   --input-file <path>   Read the script input object from a file.
-  --tab-id <id>         Browser tab id to target. Defaults to the active connected tab.
+  --tab-id <id>         Required browser tab id to target. Use session-status to find it.
   --timeout-ms <ms>     Execution timeout in milliseconds.
   --register            Save the script for reuse only if it returns ok: true.
   --pretty              Print formatted JSON output. Default output is compact.
@@ -348,6 +368,8 @@ ${indent}  await page.locator('input[name=email]').fill(input.email);`;
 
 function createCommandParser(commandName: CliCommandName): Command {
   switch (commandName) {
+    case 'version':
+      return createVersionParser();
     case 'mcp':
       return createMcpParser();
     case 'config':
@@ -371,6 +393,7 @@ function createCommandParser(commandName: CliCommandName): Command {
 
 function cliCommandNames(): CliCommandName[] {
   return [
+    'version',
     'mcp',
     'config',
     'session-status',
@@ -389,6 +412,10 @@ function isCliCommandName(commandName: string): commandName is CliCommandName {
 
 function createMcpParser(): Command {
   return createParser('mcp').description('Run the stdio MCP server for agent clients.');
+}
+
+function createVersionParser(): Command {
+  return createParser('version').description('Print the Web Cap CLI version.');
 }
 
 function createConfigParser(): Command {
@@ -435,7 +462,7 @@ function createScriptExecuteParser(): Command {
     .option('--script-file <path>', 'Read script source code from a file.')
     .option('--input <json>', 'JSON object passed to the script. Defaults to {}.')
     .option('--input-file <path>', 'Read the script input object from a file.')
-    .option('--tab-id <id>', 'Browser tab id to target.', parseIntegerOption)
+    .requiredOption('--tab-id <id>', 'Browser tab id to target.', parseIntegerOption)
     .option('--timeout-ms <ms>', 'Execution timeout in milliseconds.', parseIntegerOption)
     .option('--register', 'Save the script for reuse only if it returns ok: true.')
     .option('--pretty', 'Print formatted JSON output.');
