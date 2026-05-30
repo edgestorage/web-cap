@@ -160,6 +160,8 @@ function coreToolNameForCommand(command: CliCommand): CoreToolName | undefined {
       return 'session_status';
     case 'script-execute':
       return 'script_execute';
+    case 'browser-screenshot':
+      return 'browser_screenshot';
     case 'browser-new-tab':
       return 'browser_new_tab';
     default:
@@ -176,6 +178,13 @@ function buildCoreToolInput(
       return {};
     case 'script-execute':
       return scriptExecuteRequest!;
+    case 'browser-screenshot':
+      return {
+        tabId: command.options.tabId,
+        type: command.options.type,
+        quality: command.options.quality,
+        omitBackground: command.options.omitBackground,
+      };
     case 'browser-new-tab':
       return {
         url: command.options.url,
@@ -190,6 +199,7 @@ function jsonOutputOptionsForCommand(command: CliCommand): JsonOutputCliOptions 
   switch (command.name) {
     case 'session-status':
     case 'script-execute':
+    case 'browser-screenshot':
     case 'browser-new-tab':
     case 'config':
       return command.options;

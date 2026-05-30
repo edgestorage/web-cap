@@ -23,6 +23,7 @@ export const executeScriptOptionsSchema = z
 
 export const toolInputSchemas = {
   session_status: z.object({}),
+  browser_screenshot: browserCommandRequestSchemas.browser_screenshot,
   browser_new_tab: browserCommandRequestSchemas.create_tab,
   script_execute: z.object({
     script: z.string().min(1),
@@ -40,6 +41,7 @@ export const rpcInputSchemas = {
   scriptRegistryList: z.object({}),
   browserWaitEvents: browserCommandRequestSchemas.wait_events,
   sessionStatus: toolInputSchemas.session_status,
+  browserScreenshot: browserCommandRequestSchemas.browser_screenshot,
   browserNewTab: browserCommandRequestSchemas.create_tab,
   scriptExecute: toolInputSchemas.script_execute,
 } as const;
@@ -64,6 +66,34 @@ export const mcpToolDefinitions: {
       'Return the current browser runtime connection status, including the last active tab, all known tabs for the active runtime, and connected runtime snapshots.',
     inputSchema: {},
   },
+  browser_screenshot: {
+    title: 'Capture Browser Screenshot',
+    description:
+      'Capture a screenshot of the selected browser tab, save it under the Web Cap temporary screenshot directory, and return file metadata. Defaults to PNG visible viewport; set fullPage for a full-page screenshot when supported.',
+    inputSchema: {
+      tabId: z
+        .number()
+        .int()
+        .optional()
+        .describe('Target browser tab id. If omitted, the active tab is used.'),
+      type: z.enum(['png', 'jpeg']).optional().describe('Image format. Defaults to png.'),
+      quality: z
+        .number()
+        .int()
+        .min(0)
+        .max(100)
+        .optional()
+        .describe('JPEG quality from 0 to 100. Only used when type is jpeg.'),
+      fullPage: z
+        .boolean()
+        .optional()
+        .describe('Capture the full page instead of only the visible viewport when supported.'),
+      omitBackground: z
+        .boolean()
+        .optional()
+        .describe('Hide the default white background for pages with transparency when supported.'),
+    },
+  },
   browser_new_tab: {
     title: 'Create Browser Tab',
     description:
@@ -76,12 +106,12 @@ export const mcpToolDefinitions: {
   script_execute: {
     title: 'Execute Script',
     description:
-      'Execute script code directly in a specified tab of the connected browser. During execution, the script can call registered scripts through `cap.call("script-id", input)`, where the script id can be obtained via script search, for example: `(input) => cap.call("script-id", input)`. Inline executions receive a local script id in the execution result and local history. Set `register` to true to request permanent registration; the script is registered only after execution succeeds with a result object that includes `ok: true`.',
+      'Execute script code directly in a specified tab of the connected browser. Scripts receive an input object, return a JSON-compatible result object, and can use the Playwright-style page API. Inline executions receive a local script id in the execution result and local history. Set `register` to true to request permanent registration; the script is registered only after execution succeeds with a result object that includes `ok: true`.',
     inputSchema: {
       script: z
         .string()
         .min(1)
-        .describe('Script source code to execute in the specified browser tab. The script can call registered scripts through cap.call(...).'),
+        .describe('Script source code to execute in the specified browser tab.'),
       input: z
         .record(z.string(), z.unknown())
         .describe('Input object passed to the script at execution time.'),
@@ -155,6 +185,10 @@ export async function executeCoreTool(
     case 'browser_new_tab': {
       const input = parseToolInput(toolName, rawInput);
       return (await app.browserNewTab(input)) as unknown as Record<string, unknown>;
+    }
+    case 'browser_screenshot': {
+      const input = parseToolInput(toolName, rawInput);
+      return (await app.browserScreenshot(input)) as unknown as Record<string, unknown>;
     }
     case 'script_execute': {
       const input = parseToolInput(toolName, rawInput);

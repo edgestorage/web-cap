@@ -7,11 +7,21 @@ import type {
 import { scriptRuntimeSource } from './injected/script-runtime.generated';
 import ts from 'typescript';
 
+export interface ScriptScreenshotArtifact {
+  kind: 'screenshot';
+  path: string;
+  data: string;
+  mimeType: string;
+  type: 'png' | 'jpeg';
+  encoding: 'base64';
+}
+
 export interface ScriptExecutionResponse {
   ok: boolean;
   status?: 'succeeded' | 'interrupted';
   result?: Record<string, unknown>;
   evidence?: ExecutionEvidence;
+  screenshotArtifacts?: ScriptScreenshotArtifact[];
   error?: string;
 }
 
@@ -21,6 +31,7 @@ export interface ScriptExecutionExpressionOptions {
   managedWindowBridgeFunctionName?: string;
   managedTimerBridgeFunctionName?: string;
   managedBrowserBridgeFunctionName?: string;
+  screenshotArtifactBasePath?: string;
   evidence?: ExecutionEvidenceOption[];
 }
 
@@ -429,6 +440,10 @@ export function buildScriptExecutionExpression(
     options.managedBrowserBridgeFunctionName === undefined
       ? null
       : String(options.managedBrowserBridgeFunctionName);
+  const screenshotArtifactBasePath =
+    options.screenshotArtifactBasePath === undefined
+      ? null
+      : String(options.screenshotArtifactBasePath);
   const evidence = options.evidence ?? [];
   const scripts = new Map<string, ScriptDefinition>();
   for (const item of scriptRegistry) {
@@ -453,6 +468,7 @@ export function buildScriptExecutionExpression(
   const managedWindowBridgeFunctionName = ${JSON.stringify(managedWindowBridgeFunctionName)};
   const managedTimerBridgeFunctionName = ${JSON.stringify(managedTimerBridgeFunctionName)};
   const managedBrowserBridgeFunctionName = ${JSON.stringify(managedBrowserBridgeFunctionName)};
+  const screenshotArtifactBasePath = ${JSON.stringify(screenshotArtifactBasePath)};
   const evidence = ${JSON.stringify(evidence)};
   const timerBridge = managedTimerBridgeFunctionName ? globalThis[managedTimerBridgeFunctionName] : null;
   const nativeSetTimeout = globalThis.setTimeout.bind(globalThis);
@@ -510,6 +526,7 @@ export function buildScriptExecutionExpression(
     managedWindowBridgeFunctionName,
     managedTimerBridgeFunctionName,
     managedBrowserBridgeFunctionName,
+    screenshotArtifactBasePath,
     evidence,
     scriptFactories,
   });

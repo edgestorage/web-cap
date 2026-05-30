@@ -6,6 +6,7 @@ import {
   browserCommandInputSchemas,
   normalizeWaitEventsDurationMs,
 } from '@shared/browser-command-contracts';
+import { ChromeDebuggerClient } from './chrome-debugger-client';
 
 interface BrowserCommandResponse {
   ok: boolean;
@@ -28,7 +29,10 @@ interface BrowserCommandHandlerOptions {
 }
 
 export class BrowserCommandHandler {
-  constructor(private readonly options: BrowserCommandHandlerOptions) {}
+  constructor(
+    private readonly options: BrowserCommandHandlerOptions,
+    private readonly debuggerClient = new ChromeDebuggerClient(),
+  ) {}
 
   async execute(
     tabId: number,
@@ -43,6 +47,10 @@ export class BrowserCommandHandler {
         args: [],
       });
       return results[0]?.result ?? { ok: false, error: 'Page script returned no result.' };
+    }
+
+    if (command === 'browser_screenshot') {
+      return await this.captureScreenshot(tabId, input);
     }
 
     if (command === 'create_tab') {
@@ -67,6 +75,72 @@ export class BrowserCommandHandler {
     }
 
     return { ok: false, error: `Browser command ${command} is not supported directly.` };
+  }
+
+  private async captureScreenshot(
+    tabId: number,
+    input: Record<string, unknown>,
+  ): Promise<BrowserCommandResponse> {
+    if (!this.debuggerClient.isAvailable()) {
+      return {
+        ok: false,
+        error: 'chrome.debugger is not available in this browser runtime.',
+      };
+    }
+
+    const parsed = browserCommandInputSchemas.browser_screenshot.parse(input ?? {});
+    const format = parsed.type ?? 'png';
+    const params: Record<string, unknown> = {
+      format,
+      fromSurface: true,
+    };
+    if (format === 'jpeg' && parsed.quality !== undefined) {
+      params.quality = parsed.quality;
+    }
+    if (parsed.omitBackground !== undefined) {
+      params.omitBackground = parsed.omitBackground;
+    }
+
+    const data = await this.debuggerClient.withAttachedDebugger(tabId, async (target) => {
+      if (parsed.fullPage === true) {
+        const metrics = await this.debuggerClient.sendCommand<{
+          contentSize?: { x?: number; y?: number; width?: number; height?: number };
+        }>(target, 'Page.getLayoutMetrics');
+        const contentSize = metrics.contentSize;
+        if (contentSize) {
+          params.captureBeyondViewport = true;
+          params.clip = {
+            x: Number(contentSize.x ?? 0),
+            y: Number(contentSize.y ?? 0),
+            width: Math.max(Number(contentSize.width ?? 1), 1),
+            height: Math.max(Number(contentSize.height ?? 1), 1),
+            scale: 1,
+          };
+        }
+      }
+
+      const result = await this.debuggerClient.sendCommand<{ data?: string }>(
+        target,
+        'Page.captureScreenshot',
+        params,
+      );
+      return result.data;
+    });
+
+    if (!data) {
+      return { ok: false, error: 'Browser screenshot returned no image data.' };
+    }
+
+    return {
+      ok: true,
+      result: {
+        __webCapType: 'screenshot',
+        data,
+        mimeType: format === 'jpeg' ? 'image/jpeg' : 'image/png',
+        type: format,
+        encoding: 'base64',
+      },
+    };
   }
 
   private async waitForBrowserEvents(

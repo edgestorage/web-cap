@@ -33,6 +33,9 @@ describe('WEB_CAP CLI', () => {
       async scriptRegistryList() {
         return [];
       },
+      async browserScreenshot() {
+        throw new Error('not used');
+      },
       async browserNewTab() {
         throw new Error('not used');
       },
@@ -150,6 +153,22 @@ describe('WEB_CAP CLI', () => {
         active: false,
       },
     });
+    expect(parseCliArgs([
+      'browser-screenshot',
+      '--tab-id',
+      '7',
+      '--type',
+      'jpeg',
+      '--quality',
+      '80',
+    ])).toEqual({
+      name: 'browser-screenshot',
+      options: {
+        tabId: 7,
+        type: 'jpeg',
+        quality: 80,
+      },
+    });
     expect(parseCliArgs(['config', 'set', 'activateTabOnScriptExecute', 'true'])).toEqual({
       name: 'config',
       options: {
@@ -198,7 +217,7 @@ describe('WEB_CAP CLI', () => {
     expect(stdout).toContain('Script execution:');
     expect(stdout).toContain('web-cap script-execute --tab-id <id> --script <code>');
     expect(stdout).toContain('Runs JavaScript in the selected browser tab.');
-    expect(stdout).toContain('use cap.call(...) inside the script');
+    expect(stdout).not.toContain('use cap.call(...) inside the script');
     expect(stdout).toContain('Playwright-style page API as global page and cap.page');
     expect(stdout).toContain("await page.getByRole('button', { name: 'Login' }).click();");
     expect(stdout).toContain("await page.locator('input[name=email]').fill(input.email);");
@@ -279,10 +298,26 @@ describe('WEB_CAP CLI', () => {
           },
         };
       },
+      async browserScreenshot(input) {
+        calls.push(`browserScreenshot:${input.tabId ?? ''}:${input.type ?? ''}`);
+        return {
+          result: {
+            path: '/tmp/web-cap/temp-screenshots/s-Abc_123-xYz.png',
+            sizeBytes: 8,
+          },
+          timingMs: 1,
+          tab: {
+            tabId: input.tabId ?? 2,
+            url: 'https://example.com',
+            title: 'Example',
+          },
+        };
+      },
     });
 
     const runs = [
       ['session-status'],
+      ['browser-screenshot', '--tab-id', '2'],
       ['browser-new-tab', '--url', 'https://example.com', '--active', 'true'],
     ];
 
@@ -301,10 +336,16 @@ describe('WEB_CAP CLI', () => {
       expect(code).toBe(0);
       expect(stderr).toBe('');
       expect(() => JSON.parse(stdout)).not.toThrow();
+      if (argv[0] === 'browser-screenshot') {
+        const parsed = JSON.parse(stdout) as { result: Record<string, unknown> };
+        expect(parsed.result.path).toContain('temp-screenshots');
+        expect(parsed.result).not.toHaveProperty('data');
+      }
     }
 
     expect(calls).toEqual([
       'sessionStatus',
+      'browserScreenshot:2:',
       'browserNewTab:https://example.com:true',
     ]);
   });
@@ -427,6 +468,9 @@ describe('WEB_CAP CLI', () => {
       },
       async scriptRegistryList() {
         return [];
+      },
+      async browserScreenshot() {
+        throw new Error('not used');
       },
       async browserNewTab() {
         throw new Error('not used');
@@ -593,6 +637,9 @@ describe('WEB_CAP CLI', () => {
       },
       async scriptRegistryList() {
         return [];
+      },
+      async browserScreenshot() {
+        throw new Error('not used');
       },
       async browserNewTab() {
         throw new Error('not used');

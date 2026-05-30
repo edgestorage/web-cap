@@ -41,7 +41,7 @@ Compared with action-first browser tools, Web Cap focuses on:
 
 - In-page execution, so scripts can work directly with the DOM and page state.
 - Reusable capabilities, so successful scripts can be searched, inspected, and called again.
-- Composable scripts, so one script can call another through `cap.call(...)`.
+- Deprecated: composable scripts, where one script calls another through `cap.call(...)`.
 - Optional post-execution observation, so script runs can return evidence about what changed on the page when evidence collection is enabled.
 - Local persistence, so agent-learned workflows can survive beyond a single run.
 - CLI access, so agents can use the same browser capabilities from normal command-line workflows.
@@ -135,7 +135,7 @@ A typical agent flow is:
 
 Execute script code in the selected browser tab. Scripts receive one object argument and return one JSON object.
 
-`script-execute` accepts optional execution settings such as `--timeout-ms`, `--script-file`, `--input-file`, and `--register`. During execution, scripts can call other scripts through `cap.call(scriptId, input)`. `--register` saves the inline script only after execution succeeds with `ok: true`.
+`script-execute` accepts optional execution settings such as `--timeout-ms`, `--script-file`, `--input-file`, and `--register`. `--register` saves the inline script only after execution succeeds with `ok: true`.
 
 ### Browser commands
 
@@ -147,21 +147,22 @@ Scripts are JavaScript functions with JSON-compatible inputs and outputs:
 
 ```js
 export default async function (input) {
-  const page = await cap.call('builtin.page.inspect', {});
+  const heading = await page.locator('h1').first().textContent().catch(() => '');
 
   return {
     ok: true,
-    title: page.title,
+    title: document.title,
+    heading,
     selector: input.selector,
   };
 }
 ```
 
-The runtime injects `cap` while the script executes.
+The runtime injects `page` and `cap.page` while the script executes.
 
 Available runtime helpers:
 
-- `cap.call(scriptId, input)` - call a built-in or registered script.
+- Deprecated: `cap.call(scriptId, input)` - call a built-in or registered script.
 - `cap.get(scriptId)` - read one script schema summary.
 - `cap.list()` - list callable script schema summaries.
 

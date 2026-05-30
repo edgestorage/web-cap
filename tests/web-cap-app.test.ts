@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -50,6 +50,7 @@ describe('WebCapAgentApp', () => {
 
   afterEach(async () => {
     vi.useRealTimers();
+    delete process.env.WEB_CAP_STATE_DIR;
     for (const connectedClient of clients) {
       connectedClient.close();
     }
@@ -190,6 +191,75 @@ describe('WebCapAgentApp', () => {
       url: 'https://example.com/form',
       title: 'Example Form',
     });
+  });
+
+  it('stores page screenshot artifacts returned from script execution', async () => {
+    process.env.WEB_CAP_STATE_DIR = tempDir;
+    const screenshotBytes = Buffer.from('script screenshot bytes');
+    await connectRuntime((envelope) => {
+      if (envelope.type !== 'execute_script') {
+        return;
+      }
+
+      const screenshotPath = join(
+        String(envelope.payload.screenshotArtifactBasePath),
+        's-abcdefghijk.png',
+      );
+      const transferId = 'script-screenshot-transfer';
+      client?.send(JSON.stringify(createRuntimeEnvelope(
+        'binary_payload_start',
+        {
+          transferId,
+          kind: 'screenshot',
+          mimeType: 'image/png',
+          type: 'png',
+          byteLength: screenshotBytes.byteLength,
+          resultShape: 'metadata',
+          path: screenshotPath,
+        },
+        { sessionId: 'runtime-session', requestId: envelope.requestId },
+      )));
+      client?.send(screenshotBytes);
+      client?.send(
+        JSON.stringify(
+          createRuntimeEnvelope(
+            'execution_result',
+            {
+              result: {
+                ok: true,
+                screenshot: {
+                  path: screenshotPath,
+                },
+              },
+              screenshotArtifacts: [
+                {
+                  kind: 'screenshot',
+                  path: screenshotPath,
+                  transferId,
+                  mimeType: 'image/png',
+                  type: 'png',
+                },
+              ],
+              evidence: {
+                url: 'https://example.com/form',
+                events: [],
+                screenshots: [],
+              },
+            },
+            { sessionId: 'runtime-session', requestId: envelope.requestId },
+          ),
+        ),
+      );
+    });
+
+    const execution = await app.scriptExecute({
+      script: 'export default async function () { return { ok: true }; }',
+      input: {},
+    });
+
+    const screenshot = execution.result.screenshot as Record<string, unknown>;
+    expect(screenshot.path).toEqual(expect.stringContaining(join(tempDir, 'temp-screenshots')));
+    await expect(readFile(String(screenshot.path))).resolves.toEqual(screenshotBytes);
   });
 
   it('summarizes consecutive managed mouse move evidence', async () => {
@@ -1196,6 +1266,9 @@ describe('WebCapAgentApp', () => {
       async scriptRegistryList() {
         return [];
       },
+      async browserScreenshot() {
+        throw new Error('not used');
+      },
       async browserNewTab() {
         throw new Error('not used');
       },
@@ -1282,6 +1355,90 @@ describe('WebCapAgentApp', () => {
         updatedAt: expect.any(String),
       },
     });
+  });
+
+  it('captures a browser screenshot through the shared runtime bridge', async () => {
+    process.env.WEB_CAP_STATE_DIR = tempDir;
+    const screenshotDirectory = join(tempDir, 'temp-screenshots');
+    await mkdir(screenshotDirectory, { recursive: true });
+    const expiredScreenshot = join(screenshotDirectory, 'screenshot-old.png');
+    const freshScreenshot = join(screenshotDirectory, 'screenshot-fresh.jpg');
+    const nonScreenshotFile = join(screenshotDirectory, 'notes.txt');
+    await writeFile(expiredScreenshot, 'old');
+    await writeFile(freshScreenshot, 'fresh');
+    await writeFile(nonScreenshotFile, 'notes');
+    const expiredDate = new Date(Date.now() - 25 * 60 * 60 * 1000);
+    await utimes(expiredScreenshot, expiredDate, expiredDate);
+
+    const screenshotBytes = Buffer.from('jpeg image bytes');
+    await connectRuntime((envelope) => {
+      if (envelope.type !== 'browser_command') {
+        return;
+      }
+
+      expect(envelope.payload.command).toBe('browser_screenshot');
+      expect(envelope.payload.tabId).toBe(101);
+      expect(envelope.payload.input).toEqual({
+        type: 'jpeg',
+        quality: 80,
+        fullPage: true,
+      });
+
+      const transferId = 'browser-screenshot-transfer';
+      client?.send(JSON.stringify(createRuntimeEnvelope(
+        'binary_payload_start',
+        {
+          transferId,
+          kind: 'screenshot',
+          mimeType: 'image/jpeg',
+          type: 'jpeg',
+          byteLength: screenshotBytes.byteLength,
+          resultShape: 'metadata',
+        },
+        { sessionId: 'runtime-session', requestId: envelope.requestId },
+      )));
+      client?.send(screenshotBytes);
+      client?.send(JSON.stringify(createRuntimeEnvelope(
+        'browser_command_result',
+        {
+          result: {
+            __webCapType: 'screenshot_transfer',
+            transferId,
+            resultShape: 'metadata',
+          },
+        },
+        { sessionId: 'runtime-session', requestId: envelope.requestId },
+      )));
+    });
+
+    const result = await app.browserScreenshot({
+      tabId: 101,
+      type: 'jpeg',
+      quality: 80,
+      fullPage: true,
+    });
+
+    expect(result.result).toMatchObject({
+      sizeBytes: screenshotBytes.byteLength,
+    });
+    expect(result.result.path).toEqual(expect.stringContaining(screenshotDirectory));
+    expect(result.result).not.toHaveProperty('data');
+    expect(result).not.toHaveProperty('command');
+    expect(result.tab).toEqual({
+      tabId: 101,
+      url: 'https://example.com/form',
+      title: 'Example Form',
+    });
+
+    const storedPath = result.result.path;
+    if (typeof storedPath !== 'string') {
+      throw new Error('Expected screenshot path.');
+    }
+    await expect(readFile(storedPath)).resolves.toEqual(screenshotBytes);
+    await expect(readFile(expiredScreenshot)).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(readFile(freshScreenshot, 'utf8')).resolves.toBe('fresh');
+    await expect(readFile(nonScreenshotFile, 'utf8')).resolves.toBe('notes');
+    await expect(stat(storedPath)).resolves.toMatchObject({ size: screenshotBytes.byteLength });
   });
 
   it('waits for browser events with routed tab input and event streaming', async () => {

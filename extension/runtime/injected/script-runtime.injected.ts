@@ -1,7 +1,10 @@
 /* eslint-disable */
 // Mechanically extracted from execution-helpers.ts. Keep behavior changes out of this file.
 import { createPlaywrightPageApi } from './playwright-shim.injected';
-import type { ScriptPlaywrightPage } from './playwright-shim-types.injected';
+import type {
+  RuntimeScreenshotArtifactInput,
+  ScriptPlaywrightPage,
+} from './playwright-shim-types.injected';
 import { installManagedClickHook } from './managed-click.injected';
 import { captureVisibleElementsDiff } from './visible-elements.injected';
 
@@ -53,11 +56,21 @@ interface RuntimeEvidence {
   };
 }
 
+interface RuntimeScreenshotArtifact {
+  kind: 'screenshot';
+  path: string;
+  data: string;
+  mimeType: string;
+  type: 'png' | 'jpeg';
+  encoding: 'base64';
+}
+
 interface RuntimeContext {
   registry: Map<string, RuntimeScript>;
   evidence: RuntimeEvidence;
   state: RuntimeJsonObject;
   callStack: string[];
+  screenshotArtifacts: RuntimeScreenshotArtifact[];
   pendingAsyncOperations: Promise<unknown>;
   visibleElementsTracker: {
     start(): void;
@@ -93,6 +106,7 @@ export interface ScriptRuntimeArgs {
   managedKeyboardBridgeFunctionName: string | null;
   managedWindowBridgeFunctionName: string | null;
   managedBrowserBridgeFunctionName: string | null;
+  screenshotArtifactBasePath: string | null;
   evidence: RuntimeEvidenceOption[];
   scriptFactories: Record<string, (input: RuntimeJsonObject) => unknown>;
 }
@@ -105,6 +119,7 @@ export async function runScriptRuntime({
   managedKeyboardBridgeFunctionName,
   managedWindowBridgeFunctionName,
   managedBrowserBridgeFunctionName,
+  screenshotArtifactBasePath,
   evidence,
   scriptFactories,
 }: ScriptRuntimeArgs) {
@@ -261,6 +276,7 @@ export async function runScriptRuntime({
     evidence: createEvidence(collectEvents || collectVisibleElements),
     state: {},
     callStack: [],
+    screenshotArtifacts: [],
     pendingAsyncOperations: Promise.resolve(),
     visibleElementsTracker: captureVisibleElementsDiff(),
   };
@@ -501,6 +517,49 @@ export async function runScriptRuntime({
 
   function getManagedBrowserBridge(): ManagedBrowserBridge | null {
     return getRuntimeBridge<ManagedBrowserBridge>(managedBrowserBridgeFunctionName);
+  }
+
+  function createScreenshotFileName(type: 'png' | 'jpeg'): string {
+    const extension = type === 'jpeg' ? 'jpg' : 'png';
+    const bytes = new Uint8Array(8);
+    if (typeof globalThis.crypto?.getRandomValues === 'function') {
+      globalThis.crypto.getRandomValues(bytes);
+    } else {
+      for (let index = 0; index < bytes.length; index += 1) {
+        bytes[index] = Math.floor(Math.random() * 256);
+      }
+    }
+    const binary = Array.from(bytes, (byte) => String.fromCharCode(byte)).join('');
+    const id = btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+    return `s-${id}.${extension}`;
+  }
+
+  function joinArtifactPath(basePath: string, fileName: string): string {
+    return `${basePath.replace(/[\\/]+$/, '')}/${fileName}`;
+  }
+
+  function createScreenshotArtifact(input: RuntimeScreenshotArtifactInput): RuntimeJsonObject {
+    if (!screenshotArtifactBasePath) {
+      return {
+        data: input.data,
+        mimeType: input.mimeType,
+        type: input.type,
+      };
+    }
+
+    const path = joinArtifactPath(
+      screenshotArtifactBasePath,
+      createScreenshotFileName(input.type),
+    );
+    context.screenshotArtifacts.push({
+      kind: 'screenshot',
+      path,
+      data: input.data,
+      mimeType: input.mimeType,
+      type: input.type,
+      encoding: 'base64',
+    });
+    return { path };
   }
 
   function isEditableElement(element: unknown) {
@@ -800,6 +859,7 @@ export async function runScriptRuntime({
         }
         return await Promise.resolve(bridgeFunction({ action: 'waitForEvent', method, params, timeoutMs }));
       },
+      createScreenshotArtifact,
       recordEvidenceEvent: (type, value) => {
         context.evidence.events.push({ type, value });
       },
@@ -979,6 +1039,7 @@ export async function runScriptRuntime({
         status: interrupted ? 'interrupted' : 'succeeded',
         result,
         evidence: buildResponseEvidence(),
+        screenshotArtifacts: context.screenshotArtifacts,
       };
     } catch (error) {
       return {

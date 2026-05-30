@@ -1,12 +1,14 @@
 import type { ScriptDefinition } from '@shared/script-schema';
 import type {
   BrowserCommandResult,
+  BrowserScreenshotResult,
   ScriptExecutionHistoryEntry,
   ScriptExecutionResult,
   ExecutionEvidenceOption,
   RuntimeSessionSnapshot,
 } from '@shared/protocol';
 import type {
+  BrowserScreenshotInput,
   CreateTabInput,
   WaitEventsInput,
 } from '@shared/browser-command-contracts';
@@ -33,6 +35,7 @@ export interface WebCapAgentService {
   scriptExecute(request: ExecuteScriptRequest): Promise<ExecuteScriptResult>;
   scriptHistoryList(limit?: number): Promise<ScriptExecutionHistoryEntry[]>;
   scriptRegistryList(): Promise<ScriptDefinition[]>;
+  browserScreenshot(input: BrowserScreenshotInput): Promise<BrowserScreenshotResult>;
   browserNewTab(input: CreateTabInput): Promise<BrowserCommandResult>;
   browserWaitEvents(
     input: WaitEventsInput,

@@ -23,6 +23,27 @@ describe('browser command contracts', () => {
     });
   });
 
+  it('validates browser_screenshot options', () => {
+    expect(parseBrowserCommandRequest('browser_screenshot', {
+      tabId: 7,
+      type: 'jpeg',
+      quality: 80,
+      fullPage: true,
+    })).toEqual({
+      tabId: 7,
+      type: 'jpeg',
+      quality: 80,
+      fullPage: true,
+    });
+
+    expect(() => parseBrowserCommandRequest('browser_screenshot', { type: 'webp' })).toThrow(
+      /Invalid browser_screenshot browser command input/,
+    );
+    expect(() => parseBrowserCommandRequest('browser_screenshot', { quality: 101 })).toThrow(
+      /Invalid browser_screenshot browser command input/,
+    );
+  });
+
   it('normalizes wait_events duration and derives command timeout', () => {
     expect(normalizeWaitEventsDurationMs(undefined)).toBe(30_000);
     expect(timeoutForBrowserCommand('wait_events', { durationMs: 250 })).toBe(

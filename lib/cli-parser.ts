@@ -24,6 +24,13 @@ export interface BrowserNewTabCliOptions extends JsonOutputCliOptions {
   active?: boolean;
 }
 
+export interface BrowserScreenshotCliOptions extends JsonOutputCliOptions {
+  tabId?: number;
+  type?: 'png' | 'jpeg';
+  quality?: number;
+  omitBackground?: boolean;
+}
+
 export interface WaitEventsCliOptions {
   durationMs?: number;
   tabId?: number;
@@ -42,6 +49,7 @@ export type CliCommand =
   | { name: 'config'; options: ConfigCliOptions }
   | { name: 'session-status'; options: JsonOutputCliOptions }
   | { name: 'script-execute'; options: ScriptExecuteCliOptions }
+  | { name: 'browser-screenshot'; options: BrowserScreenshotCliOptions }
   | { name: 'browser-new-tab'; options: BrowserNewTabCliOptions }
   | { name: 'wait-events'; options: WaitEventsCliOptions };
 
@@ -70,6 +78,8 @@ export function parseCliArgs(argv: string[]): CliCommand {
       return parseSessionStatusArgs(args);
     case 'script-execute':
       return parseScriptExecuteArgs(args);
+    case 'browser-screenshot':
+      return parseBrowserScreenshotArgs(args);
     case 'browser-new-tab':
       return parseBrowserNewTabArgs(args);
     case 'wait-events':
@@ -231,6 +241,12 @@ function parseBrowserNewTabArgs(args: string[]): CliCommand {
   return options === 'help' ? helpForCommand(command) : { name: 'browser-new-tab', options };
 }
 
+function parseBrowserScreenshotArgs(args: string[]): CliCommand {
+  const command = createBrowserScreenshotParser();
+  const options = parseCommander<BrowserScreenshotCliOptions>(command, args);
+  return options === 'help' ? helpForCommand(command) : { name: 'browser-screenshot', options };
+}
+
 function parseWaitEventsArgs(args: string[]): CliCommand {
   const command = createWaitEventsParser();
   const options = parseCommander<WaitEventsCliOptions>(command, args);
@@ -255,8 +271,7 @@ function scriptExecutionHelp(): string {
   web-cap script-execute --tab-id <id> --script-file <path> [--input-file <path>] [--pretty]
 
   Runs JavaScript in the selected browser tab. Scripts receive one JSON object,
-  return one JSON object, and can use cap.call(...) inside the script to call
-  reusable capabilities.
+  return one JSON object, and can use the Playwright-style page API.
 
   Scripts also receive a Playwright-style page API as global page and cap.page.
 ${scriptRuntimeApiHelp('  ')}
@@ -293,6 +308,8 @@ function createCommandParser(commandName: CliCommandName): Command {
       return createSessionStatusParser();
     case 'script-execute':
       return createScriptExecuteParser();
+    case 'browser-screenshot':
+      return createBrowserScreenshotParser();
     case 'browser-new-tab':
       return createBrowserNewTabParser();
     case 'wait-events':
@@ -307,6 +324,7 @@ function cliCommandNames(): CliCommandName[] {
     'config',
     'session-status',
     'script-execute',
+    'browser-screenshot',
     'browser-new-tab',
     'wait-events',
   ];
@@ -360,6 +378,15 @@ function createBrowserNewTabParser(): Command {
     .description('Create a tab in the connected browser.')
     .option('--url <url>', 'URL for the new tab.')
     .option('--active <true|false>', 'Whether the tab should be activated.', parseBooleanOption);
+}
+
+function createBrowserScreenshotParser(): Command {
+  return createJsonOutputParser('browser-screenshot')
+    .description('Capture a screenshot from the connected browser tab.')
+    .option('--tab-id <id>', 'Browser tab id to target. Defaults to the active tab.', parseIntegerOption)
+    .option('--type <png|jpeg>', 'Screenshot image format. Defaults to png.', parseScreenshotTypeOption)
+    .option('--quality <0-100>', 'JPEG quality. Only applies when --type jpeg.', parseIntegerOption)
+    .option('--omit-background <true|false>', 'Hide the default white background when supported.', parseBooleanOption);
 }
 
 function createWaitEventsParser(): Command {
@@ -474,6 +501,13 @@ function parseIntegerOption(value: string): number {
   }
 
   return parsed;
+}
+
+function parseScreenshotTypeOption(value: string): 'png' | 'jpeg' {
+  if (value !== 'png' && value !== 'jpeg') {
+    throw new InvalidArgumentError('Expected png or jpeg.');
+  }
+  return value;
 }
 
 function parseBooleanOption(value: string): boolean {

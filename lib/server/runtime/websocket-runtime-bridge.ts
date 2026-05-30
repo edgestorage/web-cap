@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { resolve as resolvePath } from 'node:path';
 import { WebSocketServer, type WebSocket } from 'ws';
 import type { ScriptDefinition } from '@shared/script-schema';
 import {
@@ -21,6 +22,12 @@ import {
 } from '@shared/protocol';
 import { RuntimeBridge, RuntimeBridgeError, type BrowserCommandOptions } from './runtime-bridge';
 import { DEFAULT_BROWSER_COMMAND_TIMEOUT_MS } from '../browser/command-contracts';
+import {
+  resolveScreenshotDirectory,
+  storeBrowserScreenshotBytes,
+  storeBrowserScreenshotBytesAtPath,
+  type StoredScreenshotResult,
+} from '../browser/screenshot-store';
 
 const EXECUTION_RESPONSE_GRACE_MS = 5_000;
 
@@ -51,6 +58,23 @@ interface RuntimeConnection {
   snapshot: RuntimeConnectionSnapshot;
 }
 
+interface PendingBinaryTransfer {
+  sessionId: string;
+  requestId: string;
+  transferId: string;
+  kind: 'screenshot';
+  mimeType: string;
+  type: 'png' | 'jpeg';
+  byteLength: number;
+  resultShape: 'path' | 'metadata';
+  path?: string;
+}
+
+interface StoredBinaryTransfer {
+  resultShape: 'path' | 'metadata';
+  stored: StoredScreenshotResult;
+}
+
 export interface WebSocketRuntimeBridgeOptions {
   port?: number;
   onRuntimeCountChanged?: (runtimeCount: number) => void;
@@ -63,6 +87,8 @@ export class WebSocketRuntimeBridge implements RuntimeBridge {
   private activeSessionId?: string;
   private pendingExecutions = new Map<string, PendingExecution>();
   private pendingBrowserCommands = new Map<string, PendingBrowserCommand>();
+  private pendingBinaryTransfers = new Map<WebSocket, PendingBinaryTransfer>();
+  private storedBinaryTransfers = new Map<string, Promise<StoredBinaryTransfer>>();
   private port: number;
   private scriptHistoryLoader?: () => Promise<ScriptExecutionHistoryEntry[]>;
   private scriptRegistryLoader?: () => Promise<ScriptDefinition[]>;
@@ -125,6 +151,7 @@ export class WebSocketRuntimeBridge implements RuntimeBridge {
         ),
       );
       this.pendingExecutions.delete(requestId);
+      this.cleanupBinaryTransfersForRequest(pending.sessionId, requestId);
     }
 
     for (const [requestId, pending] of this.pendingBrowserCommands) {
@@ -136,6 +163,7 @@ export class WebSocketRuntimeBridge implements RuntimeBridge {
         ),
       );
       this.pendingBrowserCommands.delete(requestId);
+      this.cleanupBinaryTransfersForRequest(pending.sessionId, requestId);
     }
 
     await new Promise<void>((resolve) => {
@@ -151,6 +179,8 @@ export class WebSocketRuntimeBridge implements RuntimeBridge {
     this.server = undefined;
     this.runtimes.clear();
     this.socketSessions.clear();
+    this.pendingBinaryTransfers.clear();
+    this.storedBinaryTransfers.clear();
     this.activeSessionId = undefined;
   }
 
@@ -204,6 +234,7 @@ export class WebSocketRuntimeBridge implements RuntimeBridge {
       const startedAt = Date.now();
       const timer = setTimeout(() => {
         this.pendingExecutions.delete(requestId);
+        this.cleanupBinaryTransfersForRequest(target.sessionId, requestId);
         resolve({
           scriptId: scriptDefinition.id,
           status: 'interrupted',
@@ -255,6 +286,7 @@ export class WebSocketRuntimeBridge implements RuntimeBridge {
             tabId: tab.tabId,
             activateTab: options.activateTab,
             evidence,
+            screenshotArtifactBasePath: resolveScreenshotDirectory(),
           },
           {
             requestId,
@@ -292,6 +324,7 @@ export class WebSocketRuntimeBridge implements RuntimeBridge {
       const timeoutMs = options.timeoutMs ?? DEFAULT_BROWSER_COMMAND_TIMEOUT_MS;
       const timer = setTimeout(() => {
         this.pendingBrowserCommands.delete(requestId);
+        this.cleanupBinaryTransfersForRequest(target.sessionId, requestId);
         reject(
           new RuntimeBridgeError(
             `Browser command ${command} timed out after ${timeoutMs}ms.`,
@@ -360,13 +393,13 @@ export class WebSocketRuntimeBridge implements RuntimeBridge {
   }
 
   private attachClient(socket: WebSocket): void {
-    socket.on('message', (buffer: Buffer) => {
-      const parsed = JSON.parse(buffer.toString()) as RuntimeEnvelope;
-      this.handleEnvelope(socket, parsed);
+    socket.on('message', (buffer: Buffer, isBinary: boolean) => {
+      void this.handleSocketMessage(socket, buffer, isBinary);
     });
 
     socket.on('close', () => {
       const sessionId = this.socketSessions.get(socket);
+      this.pendingBinaryTransfers.delete(socket);
       this.removeRuntime(socket);
       this.rejectPendingForSession(
         sessionId,
@@ -376,12 +409,27 @@ export class WebSocketRuntimeBridge implements RuntimeBridge {
 
     socket.on('error', () => {
       const sessionId = this.socketSessions.get(socket);
+      this.pendingBinaryTransfers.delete(socket);
       this.removeRuntime(socket);
       this.rejectPendingForSession(
         sessionId,
         new RuntimeBridgeError('Browser runtime connection errored.', 'RUNTIME_DISCONNECTED'),
       );
     });
+  }
+
+  private async handleSocketMessage(
+    socket: WebSocket,
+    buffer: Buffer,
+    isBinary: boolean,
+  ): Promise<void> {
+    if (isBinary) {
+      await this.handleBinaryFrame(socket, buffer);
+      return;
+    }
+
+    const parsed = JSON.parse(buffer.toString()) as RuntimeEnvelope;
+    await this.handleEnvelope(socket, parsed);
   }
 
   private findRuntimeForExecution(
@@ -411,7 +459,7 @@ export class WebSocketRuntimeBridge implements RuntimeBridge {
     return { sessionId, runtime };
   }
 
-  private handleEnvelope(socket: WebSocket, envelope: RuntimeEnvelope): void {
+  private async handleEnvelope(socket: WebSocket, envelope: RuntimeEnvelope): Promise<void> {
     const runtime = this.runtimeForSocket(socket);
     if (runtime) {
       runtime.snapshot.lastSeenAt = envelope.timestamp;
@@ -419,7 +467,7 @@ export class WebSocketRuntimeBridge implements RuntimeBridge {
 
     switch (envelope.type) {
       case 'hello':
-        void this.handleHello(socket, envelope.payload);
+        await this.handleHello(socket, envelope.payload);
         break;
       case 'heartbeat':
         break;
@@ -433,22 +481,52 @@ export class WebSocketRuntimeBridge implements RuntimeBridge {
           this.activeSessionId = runtime.snapshot.sessionId;
         }
         break;
+      case 'binary_payload_start':
+        if (runtime) {
+          this.pendingBinaryTransfers.set(socket, {
+            sessionId: runtime.snapshot.sessionId,
+            requestId: envelope.requestId,
+            transferId: envelope.payload.transferId,
+            kind: envelope.payload.kind,
+            mimeType: envelope.payload.mimeType,
+            type: envelope.payload.type,
+            byteLength: envelope.payload.byteLength,
+            resultShape: envelope.payload.resultShape,
+            path: envelope.payload.path,
+          });
+        }
+        break;
       case 'execution_result': {
         const pending = this.pendingExecutions.get(envelope.requestId);
         if (!pending || runtime?.snapshot.sessionId !== pending.sessionId) {
           return;
         }
 
-        clearTimeout(pending.timer);
-        this.pendingExecutions.delete(envelope.requestId);
-        pending.resolve({
-          scriptId: pending.scriptDefinition.id,
-          status: envelope.payload.status ?? inferExecutionStatus(envelope.payload.evidence),
-          result: envelope.payload.result,
-          evidence: summarizeExecutionEvidence(envelope.payload.evidence),
-          timingMs: Date.now() - pending.startedAt,
-          tab: summarizeExecutionTab(pending.tab, pending.includeTabInResult),
-        });
+        try {
+          await this.awaitScreenshotArtifactTransfers(
+            envelope.payload.screenshotArtifacts,
+            pending.sessionId,
+            envelope.requestId,
+          );
+          clearTimeout(pending.timer);
+          this.pendingExecutions.delete(envelope.requestId);
+          pending.resolve({
+            scriptId: pending.scriptDefinition.id,
+            status: envelope.payload.status ?? inferExecutionStatus(envelope.payload.evidence),
+            result: envelope.payload.result,
+            evidence: summarizeExecutionEvidence(envelope.payload.evidence),
+            timingMs: Date.now() - pending.startedAt,
+            tab: summarizeExecutionTab(pending.tab, pending.includeTabInResult),
+          });
+          this.cleanupBinaryTransfersForRequest(pending.sessionId, envelope.requestId);
+        } catch (error) {
+          clearTimeout(pending.timer);
+          this.pendingExecutions.delete(envelope.requestId);
+          pending.reject(
+            error instanceof Error ? error : new Error(String(error)),
+          );
+          this.cleanupBinaryTransfersForRequest(pending.sessionId, envelope.requestId);
+        }
         break;
       }
       case 'browser_command_result': {
@@ -457,14 +535,29 @@ export class WebSocketRuntimeBridge implements RuntimeBridge {
           return;
         }
 
-        clearTimeout(pending.timer);
-        this.pendingBrowserCommands.delete(envelope.requestId);
-        pending.resolve({
-          command: pending.command,
-          result: envelope.payload.result,
-          timingMs: Date.now() - pending.startedAt,
-          tab: pending.tab,
-        });
+        try {
+          const result = await this.materializeBinaryTransferArtifacts(
+            envelope.payload.result,
+            pending.sessionId,
+            envelope.requestId,
+          );
+          clearTimeout(pending.timer);
+          this.pendingBrowserCommands.delete(envelope.requestId);
+          pending.resolve({
+            command: pending.command,
+            result,
+            timingMs: Date.now() - pending.startedAt,
+            tab: pending.tab,
+          });
+          this.cleanupBinaryTransfersForRequest(pending.sessionId, envelope.requestId);
+        } catch (error) {
+          clearTimeout(pending.timer);
+          this.pendingBrowserCommands.delete(envelope.requestId);
+          pending.reject(
+            error instanceof Error ? error : new Error(String(error)),
+          );
+          this.cleanupBinaryTransfersForRequest(pending.sessionId, envelope.requestId);
+        }
         break;
       }
       case 'browser_command_event': {
@@ -490,6 +583,7 @@ export class WebSocketRuntimeBridge implements RuntimeBridge {
             ),
           );
           this.pendingExecutions.delete(envelope.requestId);
+          this.cleanupBinaryTransfersForRequest(pending.sessionId, envelope.requestId);
         }
 
         const browserCommand = envelope.requestId
@@ -509,12 +603,177 @@ export class WebSocketRuntimeBridge implements RuntimeBridge {
             ),
           );
           this.pendingBrowserCommands.delete(envelope.requestId);
+          this.cleanupBinaryTransfersForRequest(browserCommand.sessionId, envelope.requestId);
         }
         break;
       }
       case 'hello_ack':
         break;
     }
+  }
+
+  private async handleBinaryFrame(socket: WebSocket, buffer: Buffer): Promise<void> {
+    const transfer = this.pendingBinaryTransfers.get(socket);
+    if (!transfer) {
+      console.warn('WEB_CAP received an unexpected binary payload.');
+      return;
+    }
+
+    this.pendingBinaryTransfers.delete(socket);
+    if (buffer.byteLength !== transfer.byteLength) {
+      const error = new RuntimeBridgeError(
+        `Binary payload ${transfer.transferId} size mismatch: expected ${transfer.byteLength} bytes, received ${buffer.byteLength}.`,
+        'EXECUTION_FAILED',
+      );
+      this.rejectPendingForRequest(transfer.sessionId, transfer.requestId, error);
+      return;
+    }
+
+    const storage = (
+      transfer.path
+        ? storeBrowserScreenshotBytesAtPath(buffer, {
+            mimeType: transfer.mimeType,
+            type: transfer.type,
+          }, transfer.path)
+        : storeBrowserScreenshotBytes(buffer, {
+            mimeType: transfer.mimeType,
+            type: transfer.type,
+          })
+    ).then((stored) => ({
+      resultShape: transfer.resultShape,
+      stored,
+    }));
+    storage.catch(() => undefined);
+    this.storedBinaryTransfers.set(this.binaryTransferKey(transfer), storage);
+  }
+
+  private async awaitScreenshotArtifactTransfers(
+    artifacts: { transferId: string; path: string }[] | undefined,
+    sessionId: string,
+    requestId: string,
+  ): Promise<void> {
+    if (!artifacts?.length) {
+      return;
+    }
+    await Promise.all(
+      artifacts.map(async (artifact) => {
+        const transfer = await this.readStoredBinaryTransfer(
+          sessionId,
+          requestId,
+          artifact.transferId,
+        );
+        if (resolvePath(transfer.stored.path) !== resolvePath(artifact.path)) {
+          throw new RuntimeBridgeError(
+            `Screenshot artifact ${artifact.transferId} path did not match its binary payload path.`,
+            'EXECUTION_FAILED',
+          );
+        }
+      }),
+    );
+  }
+
+  private async materializeBinaryTransferArtifacts(
+    value: unknown,
+    sessionId: string,
+    requestId: string,
+  ): Promise<Record<string, unknown>> {
+    const materialized = await this.materializeBinaryTransferValue(value, sessionId, requestId);
+    if (!isRecord(materialized)) {
+      throw new RuntimeBridgeError(
+        'Browser runtime returned a non-object result after binary payload materialization.',
+        'EXECUTION_FAILED',
+      );
+    }
+    return materialized;
+  }
+
+  private async materializeBinaryTransferValue(
+    value: unknown,
+    sessionId: string,
+    requestId: string,
+  ): Promise<unknown> {
+    if (isBinaryTransferMarker(value)) {
+      const transfer = await this.readStoredBinaryTransfer(sessionId, requestId, value.transferId);
+      return transfer.resultShape === 'metadata'
+        ? { ...transfer.stored }
+        : transfer.stored.path;
+    }
+
+    if (Array.isArray(value)) {
+      return await Promise.all(
+        value.map((item) => this.materializeBinaryTransferValue(item, sessionId, requestId)),
+      );
+    }
+
+    if (isRecord(value)) {
+      const entries = await Promise.all(
+        Object.entries(value).map(async ([key, item]) => [
+          key,
+          await this.materializeBinaryTransferValue(item, sessionId, requestId),
+        ]),
+      );
+      return Object.fromEntries(entries);
+    }
+
+    return value;
+  }
+
+  private async readStoredBinaryTransfer(
+    sessionId: string,
+    requestId: string,
+    transferId: string,
+  ): Promise<StoredBinaryTransfer> {
+    const key = this.binaryTransferKey({ sessionId, requestId, transferId });
+    const transfer = this.storedBinaryTransfers.get(key);
+    if (!transfer) {
+      throw new RuntimeBridgeError(
+        `Binary payload ${transferId} was not received for request ${requestId}.`,
+        'EXECUTION_FAILED',
+      );
+    }
+    return await transfer;
+  }
+
+  private cleanupBinaryTransfersForRequest(sessionId: string, requestId: string): void {
+    const prefix = `${sessionId}:${requestId}:`;
+    for (const [socket, transfer] of this.pendingBinaryTransfers) {
+      if (transfer.sessionId === sessionId && transfer.requestId === requestId) {
+        this.pendingBinaryTransfers.delete(socket);
+      }
+    }
+
+    for (const [key, transfer] of this.storedBinaryTransfers) {
+      if (key.startsWith(prefix)) {
+        transfer.catch(() => undefined);
+        this.storedBinaryTransfers.delete(key);
+      }
+    }
+  }
+
+  private binaryTransferKey(input: {
+    sessionId: string;
+    requestId: string;
+    transferId: string;
+  }): string {
+    return `${input.sessionId}:${input.requestId}:${input.transferId}`;
+  }
+
+  private rejectPendingForRequest(sessionId: string, requestId: string, error: Error): void {
+    const execution = this.pendingExecutions.get(requestId);
+    if (execution?.sessionId === sessionId) {
+      clearTimeout(execution.timer);
+      execution.reject(error);
+      this.pendingExecutions.delete(requestId);
+    }
+
+    const browserCommand = this.pendingBrowserCommands.get(requestId);
+    if (browserCommand?.sessionId === sessionId) {
+      clearTimeout(browserCommand.timer);
+      browserCommand.reject(error);
+      this.pendingBrowserCommands.delete(requestId);
+    }
+
+    this.cleanupBinaryTransfersForRequest(sessionId, requestId);
   }
 
   private async handleHello(socket: WebSocket, payload: RuntimeHelloPayload): Promise<void> {
@@ -627,6 +886,7 @@ export class WebSocketRuntimeBridge implements RuntimeBridge {
       clearTimeout(pending.timer);
       pending.reject(error);
       this.pendingExecutions.delete(requestId);
+      this.cleanupBinaryTransfersForRequest(sessionId, requestId);
     }
 
     for (const [requestId, pending] of this.pendingBrowserCommands) {
@@ -636,6 +896,7 @@ export class WebSocketRuntimeBridge implements RuntimeBridge {
       clearTimeout(pending.timer);
       pending.reject(error);
       this.pendingBrowserCommands.delete(requestId);
+      this.cleanupBinaryTransfersForRequest(sessionId, requestId);
     }
   }
 }
@@ -750,6 +1011,16 @@ function hasVisibleElementChanges(
     visibleElements.added.length > 0 ||
     visibleElements.removed.length > 0 ||
     visibleElements.updated.length > 0
+  );
+}
+
+function isBinaryTransferMarker(value: unknown): value is {
+  transferId: string;
+} {
+  return (
+    isRecord(value) &&
+    value.__webCapType === 'screenshot_transfer' &&
+    typeof value.transferId === 'string'
   );
 }
 
