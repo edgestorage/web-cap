@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { ChromeDebuggerClient } from '../extension/runtime/chrome-debugger-client';
 import { DebuggerScriptExecutor } from '../extension/runtime/debugger-executor';
 import {
   createDebuggerActionScript,
@@ -12,6 +13,8 @@ describe('DebuggerScriptExecutor', () => {
   const previousBrowser = (globalThis as typeof globalThis & { browser?: unknown }).browser;
 
   afterEach(() => {
+    vi.useRealTimers();
+
     if (previousChrome === undefined) {
       delete (globalThis as typeof globalThis & { chrome?: unknown }).chrome;
     } else {
@@ -173,6 +176,68 @@ export default async function () {
       buttons: 0,
     });
     expect(commands.some(({ method }) => method === 'Runtime.removeBinding')).toBe(true);
+  });
+
+  it('times out debugger attach and sendCommand callbacks', async () => {
+    vi.useFakeTimers();
+
+    (globalThis as typeof globalThis & { chrome?: unknown }).chrome = {
+      debugger: {
+        attach: () => undefined,
+        detach: (_target: { tabId: number }, callback: () => void) => callback(),
+        sendCommand: () => undefined,
+      },
+      runtime: {
+        lastError: undefined,
+      },
+    };
+
+    const client = new ChromeDebuggerClient(60_000, undefined, 5);
+    const attached = client.withAttachedDebugger(7, async () => ({ ok: true }));
+    const attachedExpectation = expect(attached).rejects.toThrow(
+      'chrome.debugger.attach timed out after 5ms.',
+    );
+    await vi.advanceTimersByTimeAsync(5);
+    await attachedExpectation;
+
+    const command = client.sendCommand({ tabId: 7 }, 'Runtime.evaluate');
+    const commandExpectation = expect(command).rejects.toThrow(
+      'chrome.debugger.sendCommand(Runtime.evaluate) timed out after 5ms.',
+    );
+    await vi.advanceTimersByTimeAsync(5);
+    await commandExpectation;
+  });
+
+  it('does not wait forever for idle detach callbacks', async () => {
+    vi.useFakeTimers();
+    let detached = false;
+
+    (globalThis as typeof globalThis & { chrome?: unknown }).chrome = {
+      debugger: {
+        attach: (_target: { tabId: number }, _version: string, callback: () => void) => callback(),
+        detach: () => {
+          detached = true;
+        },
+        sendCommand: (
+          _target: { tabId: number },
+          _method: string,
+          _params: Record<string, unknown>,
+          callback: (result?: unknown) => void,
+        ) => callback({}),
+      },
+      runtime: {
+        lastError: undefined,
+      },
+    };
+
+    const client = new ChromeDebuggerClient(1, undefined, 5);
+    await expect(client.withAttachedDebugger(7, async () => ({ ok: true }))).resolves.toEqual({
+      ok: true,
+    });
+
+    await vi.advanceTimersByTimeAsync(1);
+    await vi.advanceTimersByTimeAsync(5);
+    expect(detached).toBe(true);
   });
 
   it('closes tabs through the managed window bridge', async () => {

@@ -8,6 +8,7 @@ interface AttachedSession {
 
 const DEBUGGER_VERSION = '1.3';
 const DEFAULT_IDLE_DETACH_DELAY_MS = 60_000;
+const DEFAULT_DEBUGGER_OPERATION_TIMEOUT_MS = 10_000;
 
 export class ChromeDebuggerClient {
   private readonly sessions = new Map<number, AttachedSession>();
@@ -15,6 +16,7 @@ export class ChromeDebuggerClient {
   constructor(
     private readonly idleDetachDelayMs = DEFAULT_IDLE_DETACH_DELAY_MS,
     private readonly onIdleDetach?: (tabId: number) => void,
+    private readonly operationTimeoutMs = DEFAULT_DEBUGGER_OPERATION_TIMEOUT_MS,
   ) {}
 
   isAvailable(): boolean {
@@ -43,7 +45,7 @@ export class ChromeDebuggerClient {
       throw new Error('chrome.debugger is not available in this browser runtime.');
     }
 
-    return await new Promise<T>((resolve, reject) => {
+    return await this.withTimeout<T>(`chrome.debugger.sendCommand(${method})`, (resolve, reject) => {
       chromeApi.debugger?.sendCommand(
         target,
         method,
@@ -129,7 +131,7 @@ export class ChromeDebuggerClient {
       throw new Error('chrome.debugger is not available in this browser runtime.');
     }
 
-    await new Promise<void>((resolve, reject) => {
+    await this.withTimeout<void>('chrome.debugger.attach', (resolve, reject) => {
       chromeApi.debugger?.attach(target, DEBUGGER_VERSION, () => {
         const error = chromeApi.runtime?.lastError;
         if (error) {
@@ -147,7 +149,7 @@ export class ChromeDebuggerClient {
       return;
     }
 
-    await new Promise<void>((resolve, reject) => {
+    await this.withTimeout<void>('chrome.debugger.detach', (resolve, reject) => {
       chromeApi.debugger?.detach(target, () => {
         const error = chromeApi.runtime?.lastError;
         if (error) {
@@ -158,5 +160,38 @@ export class ChromeDebuggerClient {
       });
     }).catch(() => undefined);
   }
-}
 
+  private async withTimeout<T>(
+    label: string,
+    start: (resolve: (value: T) => void, reject: (error: Error) => void) => void,
+  ): Promise<T> {
+    return await new Promise<T>((resolve, reject) => {
+      let settled = false;
+      const timeout = setTimeout(() => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        reject(new Error(`${label} timed out after ${this.operationTimeoutMs}ms.`));
+      }, this.operationTimeoutMs);
+
+      const finish = (callback: () => void) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(timeout);
+        callback();
+      };
+
+      try {
+        start(
+          (value) => finish(() => resolve(value)),
+          (error) => finish(() => reject(error)),
+        );
+      } catch (error) {
+        finish(() => reject(error instanceof Error ? error : new Error(String(error))));
+      }
+    });
+  }
+}

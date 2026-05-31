@@ -208,7 +208,18 @@ class RuntimeClient {
     evidenceOptions: ExecutionEvidenceOption[] = ['common'],
     screenshotArtifactBasePath?: string,
   ): Promise<void> {
-    const selectedTab = tabId ? await browser.tabs.get(tabId) : await this.getActiveTab();
+    let selectedTab: BrowserTabLike | undefined;
+    try {
+      selectedTab = tabId ? await browser.tabs.get(tabId) : await this.getActiveTab();
+    } catch (error) {
+      this.sendError(
+        requestId,
+        'EXECUTION_FAILED',
+        error instanceof Error ? error.message : String(error),
+        { scriptId: scriptDefinition.id, tabId },
+      );
+      return;
+    }
     if (!selectedTab?.id || !selectedTab.url) {
       this.sendError(requestId, 'TAB_NOT_FOUND', 'No active browser tab is available.', {
         scriptId: scriptDefinition.id,
@@ -438,7 +449,18 @@ class RuntimeClient {
     input: Record<string, unknown>,
     tabId?: number,
   ): Promise<void> {
-    const activeTab = tabId ? await browser.tabs.get(tabId) : await this.getActiveTab();
+    let activeTab: BrowserTabLike | undefined;
+    try {
+      activeTab = tabId ? await browser.tabs.get(tabId) : await this.getActiveTab();
+    } catch (error) {
+      this.sendError(
+        requestId,
+        'EXECUTION_FAILED',
+        error instanceof Error ? error.message : String(error),
+        { command, tabId },
+      );
+      return;
+    }
     if (!activeTab?.id || !activeTab.url) {
       this.sendError(requestId, 'TAB_NOT_FOUND', 'No active browser tab is available.', {
         command,
