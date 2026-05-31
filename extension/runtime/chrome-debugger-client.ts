@@ -39,27 +39,32 @@ export class ChromeDebuggerClient {
     target: DebuggeeTarget,
     method: string,
     commandParams?: Record<string, unknown>,
+    options: { timeoutMs?: number } = {},
   ): Promise<T> {
     const chromeApi = this.getChromeApi();
     if (!chromeApi?.debugger || !chromeApi.runtime) {
       throw new Error('chrome.debugger is not available in this browser runtime.');
     }
 
-    return await this.withTimeout<T>(`chrome.debugger.sendCommand(${method})`, (resolve, reject) => {
-      chromeApi.debugger?.sendCommand(
-        target,
-        method,
-        commandParams ?? {},
-        (result?: unknown) => {
-          const error = chromeApi.runtime?.lastError;
-          if (error) {
-            reject(new Error(error.message));
-            return;
-          }
-          resolve(result as T);
-        },
-      );
-    });
+    return await this.withTimeout<T>(
+      `chrome.debugger.sendCommand(${method})`,
+      (resolve, reject) => {
+        chromeApi.debugger?.sendCommand(
+          target,
+          method,
+          commandParams ?? {},
+          (result?: unknown) => {
+            const error = chromeApi.runtime?.lastError;
+            if (error) {
+              reject(new Error(error.message));
+              return;
+            }
+            resolve(result as T);
+          },
+        );
+      },
+      options.timeoutMs,
+    );
   }
 
   getChromeApi(): ChromeLike | undefined {
@@ -164,6 +169,7 @@ export class ChromeDebuggerClient {
   private async withTimeout<T>(
     label: string,
     start: (resolve: (value: T) => void, reject: (error: Error) => void) => void,
+    timeoutMs = this.operationTimeoutMs,
   ): Promise<T> {
     return await new Promise<T>((resolve, reject) => {
       let settled = false;
@@ -172,8 +178,8 @@ export class ChromeDebuggerClient {
           return;
         }
         settled = true;
-        reject(new Error(`${label} timed out after ${this.operationTimeoutMs}ms.`));
-      }, this.operationTimeoutMs);
+        reject(new Error(`${label} timed out after ${timeoutMs}ms.`));
+      }, timeoutMs);
 
       const finish = (callback: () => void) => {
         if (settled) {

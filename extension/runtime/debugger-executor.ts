@@ -76,6 +76,8 @@ export class DebuggerScriptExecutor {
           returnByValue: true,
           userGesture: true,
           allowUnsafeEvalBlockedByCSP: true,
+        }, {
+          timeoutMs: scriptDefinition.script.timeoutMs,
         });
       } finally {
         await browserBridge.dispose();

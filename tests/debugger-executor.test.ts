@@ -208,6 +208,39 @@ export default async function () {
     await commandExpectation;
   });
 
+  it('allows long-running debugger commands to use a command-specific timeout', async () => {
+    vi.useFakeTimers();
+
+    (globalThis as typeof globalThis & { chrome?: unknown }).chrome = {
+      debugger: {
+        attach: () => undefined,
+        detach: (_target: { tabId: number }, callback: () => void) => callback(),
+        sendCommand: () => undefined,
+      },
+      runtime: {
+        lastError: undefined,
+      },
+    };
+
+    const client = new ChromeDebuggerClient(60_000, undefined, 10);
+    const command = client.sendCommand({ tabId: 7 }, 'Runtime.evaluate', undefined, {
+      timeoutMs: 15,
+    });
+    let rejected = false;
+    void command.catch(() => {
+      rejected = true;
+    });
+
+    await vi.advanceTimersByTimeAsync(10);
+    expect(rejected).toBe(false);
+
+    const commandExpectation = expect(command).rejects.toThrow(
+      'chrome.debugger.sendCommand(Runtime.evaluate) timed out after 15ms.',
+    );
+    await vi.advanceTimersByTimeAsync(5);
+    await commandExpectation;
+  });
+
   it('does not wait forever for idle detach callbacks', async () => {
     vi.useFakeTimers();
     let detached = false;
