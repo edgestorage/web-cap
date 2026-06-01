@@ -4,52 +4,17 @@ import {
   scriptDefinitionSchema,
   type CloudScriptRecord,
   type ScriptDefinition,
-  type ScriptSearchFilters,
 } from '@shared/script-schema';
 import type { ScriptExecutionHistoryEntry } from '@shared/protocol';
-import { toSchemaSummary } from '@shared/validation';
 import type { ScriptExecutionHistory } from './execution-history';
-import {
-  builtinScripts,
-  getBuiltinScriptById,
-} from './builtin-scripts';
+import { builtinScripts } from './builtin-scripts';
 import type { ScriptProvider, ScriptSaveContext } from '../providers/script-provider';
-import { RuntimeBridgeError } from '../runtime/runtime-bridge';
 
 export class ScriptRegistryService {
   constructor(
     private readonly scriptProvider: ScriptProvider,
     private readonly scriptExecutionHistory: ScriptExecutionHistory,
   ) {}
-
-  async search(query: string, filters?: ScriptSearchFilters) {
-    return await this.scriptProvider.search(query, filters);
-  }
-
-  async getSchemaSummary(scriptId: string, version?: string) {
-    return toSchemaSummary(await this.getScriptDefinition(scriptId, version));
-  }
-
-  async getScriptDefinition(scriptId: string, version?: string): Promise<ScriptDefinition> {
-    const scriptDefinition =
-      getBuiltinScriptById(scriptId) ??
-      (await this.scriptProvider.getById(scriptId, version)) ??
-      (await this.getHistoryScriptDefinition(scriptId));
-    if (!scriptDefinition) {
-      throw new RuntimeBridgeError(
-        `Script ${scriptId} was not found.`,
-        'SCRIPT_NOT_FOUND',
-      );
-    }
-
-    return scriptDefinition;
-  }
-
-  async register(rawScriptDefinition: unknown): Promise<CloudScriptRecord> {
-    const scriptDefinition = scriptDefinitionSchema.parse(rawScriptDefinition);
-    assertRegisterableOutputSchema(scriptDefinition);
-    return await this.saveScriptDefinition(scriptDefinition);
-  }
 
   async saveScriptDefinition(
     scriptDefinition: ScriptDefinition,
@@ -84,19 +49,6 @@ export class ScriptRegistryService {
       ...(await this.buildActiveProviderScriptDefinitions()),
       ...historyScriptDefinitions,
     ]).filter((candidate) => candidate.id !== currentScriptId);
-  }
-
-  private async getHistoryScriptDefinition(scriptId: string): Promise<ScriptDefinition | undefined> {
-    if (!isTempScriptId(scriptId)) {
-      return undefined;
-    }
-
-    const entry = await this.scriptExecutionHistory.get(scriptId);
-    if (!entry || !isReusableTemporaryHistoryScript(entry)) {
-      return undefined;
-    }
-
-    return buildInlineScriptDefinition(entry.localScriptId, entry.script);
   }
 
   private async buildActiveProviderScriptDefinitions(): Promise<ScriptDefinition[]> {
@@ -153,18 +105,6 @@ function isReusableTemporaryHistoryScript(entry: ScriptExecutionHistoryEntry): b
     isTempScriptId(entry.localScriptId) &&
     (entry.status === 'succeeded' || entry.status === 'interrupted')
   );
-}
-
-function assertRegisterableOutputSchema(scriptDefinition: ScriptDefinition): void {
-  if (
-    !Object.prototype.hasOwnProperty.call(scriptDefinition.outputSchema.properties, 'ok') ||
-    !scriptDefinition.outputSchema.required.includes('ok')
-  ) {
-    throw new RuntimeBridgeError(
-      'Registered scripts must declare outputSchema.properties.ok and include ok in outputSchema.required.',
-      'INVALID_INPUT',
-    );
-  }
 }
 
 function dedupeScriptDefinitions(scripts: ScriptDefinition[]): ScriptDefinition[] {

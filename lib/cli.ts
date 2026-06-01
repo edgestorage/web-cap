@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 
-import { realpathSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   buildScriptExecuteRequest,
-  buildScriptRegisterRequest,
   parseCliArgs,
   type CliCommand,
   type JsonOutputCliOptions,
@@ -19,7 +19,7 @@ import type { ExecuteScriptRequest, WebCapAgentService } from './server/agent/co
 import { executeCoreTool, type CoreToolName } from './server/tool-contracts';
 import { runMcpServer } from './mcp-server';
 
-export { buildScriptExecuteRequest, buildScriptRegisterRequest, parseCliArgs } from './cli-parser';
+export { buildScriptExecuteRequest, parseCliArgs } from './cli-parser';
 
 interface CliIo {
   stdout: Pick<NodeJS.WriteStream, 'write'>;
@@ -36,6 +36,10 @@ export async function runCli(
     const command = parseCliArgs(argv);
     if (command.name === 'help') {
       io.stdout.write(`${command.text}\n`);
+      return 0;
+    }
+    if (command.name === 'version') {
+      io.stdout.write(`${readPackageVersion()}\n`);
       return 0;
     }
     if (command.name === 'mcp') {
@@ -55,11 +59,6 @@ export async function runCli(
     if (scriptExecuteRequest) {
       await applyConfiguredScriptExecutionOptions(scriptExecuteRequest);
     }
-    const scriptRegisterRequest =
-      command.name === 'script-register'
-        ? await buildScriptRegisterRequest(command.options)
-        : undefined;
-
     const app = await connect();
     try {
       const coreToolName = coreToolNameForCommand(command);
@@ -67,7 +66,7 @@ export async function runCli(
         const result = await executeCoreTool(
           app,
           coreToolName,
-          buildCoreToolInput(command, scriptExecuteRequest, scriptRegisterRequest),
+          buildCoreToolInput(command, scriptExecuteRequest),
         );
         writeJson(io, result, jsonOutputOptionsForCommand(command));
         return 0;
@@ -106,19 +105,19 @@ async function handleConfigCommand(
   if (options.action === 'get') {
     return {
       key: options.key,
-      value: current[options.key] ?? false,
+      value: readDefaultedConfigValue(current, options.key),
       config: current,
     };
   }
 
   const next: WebCapConfig = {
     ...current,
-    [options.key]: options.value ?? false,
+    [options.key]: options.value ?? readDefaultConfigValue(options.key),
   };
   const saved = await saveWebCapConfig(next);
   return {
     key: options.key,
-    value: saved[options.key] ?? false,
+    value: readDefaultedConfigValue(saved, options.key),
     config: saved,
   };
 }
@@ -127,28 +126,40 @@ async function applyConfiguredScriptExecutionOptions(
   request: ExecuteScriptRequest,
 ): Promise<void> {
   const config = await loadWebCapConfig();
-  if (config.activateTabOnScriptExecute !== true) {
-    return;
+  const evidence = config.evidence ?? ['common'];
+
+  if (config.activateTabOnScriptExecute === true) {
+    request.options = {
+      ...request.options,
+      activateTab: true,
+    };
   }
 
-  request.options = {
-    ...request.options,
-    activateTab: true,
-  };
+  if (evidence.length > 0) {
+    request.options = {
+      ...request.options,
+      evidence,
+    };
+  }
+}
+
+function readDefaultedConfigValue(
+  config: WebCapConfig,
+  key: keyof WebCapConfig,
+): boolean | string[] {
+  return config[key] ?? readDefaultConfigValue(key);
+}
+
+function readDefaultConfigValue(key: keyof WebCapConfig): boolean | string[] {
+  return key === 'evidence' ? ['common'] : false;
 }
 
 function coreToolNameForCommand(command: CliCommand): CoreToolName | undefined {
   switch (command.name) {
     case 'session-status':
       return 'session_status';
-    case 'script-search':
-      return 'script_search';
-    case 'script-get':
-      return 'script_get';
     case 'script-execute':
       return 'script_execute';
-    case 'script-register':
-      return 'script_register';
     case 'browser-new-tab':
       return 'browser_new_tab';
     default:
@@ -159,28 +170,12 @@ function coreToolNameForCommand(command: CliCommand): CoreToolName | undefined {
 function buildCoreToolInput(
   command: CliCommand,
   scriptExecuteRequest: ExecuteScriptRequest | undefined,
-  scriptRegisterRequest: Record<string, unknown> | undefined,
 ): unknown {
   switch (command.name) {
     case 'session-status':
       return {};
-    case 'script-search':
-      return {
-        query: command.options.query,
-        filters: {
-          type: command.options.type,
-          site: command.options.site,
-        },
-      };
-    case 'script-get':
-      return {
-        scriptId: command.options.scriptId,
-        version: command.options.version,
-      };
     case 'script-execute':
       return scriptExecuteRequest!;
-    case 'script-register':
-      return { scriptDefinition: scriptRegisterRequest! };
     case 'browser-new-tab':
       return {
         url: command.options.url,
@@ -194,10 +189,7 @@ function buildCoreToolInput(
 function jsonOutputOptionsForCommand(command: CliCommand): JsonOutputCliOptions {
   switch (command.name) {
     case 'session-status':
-    case 'script-search':
-    case 'script-get':
     case 'script-execute':
-    case 'script-register':
     case 'browser-new-tab':
     case 'config':
       return command.options;
@@ -212,7 +204,17 @@ function formatCliError(error: unknown): string {
 }
 
 function writeJson(io: CliIo, value: unknown, options: JsonOutputCliOptions): void {
-  io.stdout.write(`${JSON.stringify(value, null, options.compact ? 0 : 2)}\n`);
+  io.stdout.write(`${JSON.stringify(value, null, options.pretty ? 2 : 0)}\n`);
+}
+
+function readPackageVersion(): string {
+  const packageJsonPath = join(dirname(fileURLToPath(import.meta.url)), '..', 'package.json');
+  const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf8')) as { version?: unknown };
+  if (typeof packageJson.version !== 'string' || packageJson.version.trim().length === 0) {
+    throw new Error('Package version is unavailable.');
+  }
+
+  return packageJson.version;
 }
 
 if (isDirectEntryPoint(import.meta.url, process.argv[1])) {

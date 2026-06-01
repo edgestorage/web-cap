@@ -1,4 +1,5 @@
 import type { ScriptDefinition } from '@shared/script-schema';
+import type { ExecutionEvidenceOption } from '@shared/protocol';
 import {
   annotateExecutionResponse,
   buildScriptExecutionExpression,
@@ -36,6 +37,7 @@ export class UserScriptExecutor {
     scriptDefinition: ScriptDefinition,
     input: Record<string, unknown>,
     scriptRegistry: ScriptDefinition[],
+    evidence: ExecutionEvidenceOption[] = [],
   ): Promise<ScriptExecutionResponse> {
     const chromeApi = this.getChromeApi();
     if (!chromeApi?.userScripts?.execute) {
@@ -48,7 +50,9 @@ export class UserScriptExecutor {
       injectImmediately: true,
       js: [
         {
-          code: buildScriptExecutionExpression(scriptDefinition, input, scriptRegistry),
+          code: buildScriptExecutionExpression(scriptDefinition, input, scriptRegistry, {
+            evidence,
+          }),
         },
       ],
     });

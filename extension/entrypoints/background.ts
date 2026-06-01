@@ -6,6 +6,7 @@ import {
   type BrowserCommandName,
   type ExecutionEvidence,
   type ExecutionEvidenceEvent,
+  type ExecutionEvidenceOption,
   type RuntimeEnvelope,
   type ScriptExecutionHistoryEntry,
   type RuntimeTabSnapshot,
@@ -50,12 +51,14 @@ interface ExecutionTabUpdate {
   tabId: number;
   status?: string;
   url?: string;
+  title?: string;
 }
 
 interface ExecutionObservation {
   requestId: string;
   tabId: number;
   startedUrl: string;
+  startedTitle: string;
   createdTabs: Map<number, BrowserTabLike>;
   targetUpdates: ExecutionTabUpdate[];
 }
@@ -170,6 +173,7 @@ class RuntimeClient {
           envelope.payload.scriptRegistry,
           envelope.payload.tabId,
           envelope.payload.activateTab,
+          envelope.payload.evidence ?? [],
         );
         break;
       case 'browser_command':
@@ -198,6 +202,7 @@ class RuntimeClient {
     scriptRegistry: ScriptDefinition[],
     tabId?: number,
     activateTab?: boolean,
+    evidenceOptions: ExecutionEvidenceOption[] = ['common'],
   ): Promise<void> {
     const selectedTab = tabId ? await browser.tabs.get(tabId) : await this.getActiveTab();
     if (!selectedTab?.id || !selectedTab.url) {
@@ -215,7 +220,15 @@ class RuntimeClient {
       activeTab = await this.activateExecutionTab(activeTab);
     }
 
-    const observation = this.startExecutionObservation(requestId, activeTab.id, activeTab.url);
+    const collectEvents = shouldCollectExecutionEvidence(evidenceOptions, 'events');
+    const observation = collectEvents
+      ? this.startExecutionObservation(
+          requestId,
+          activeTab.id,
+          activeTab.url,
+          activeTab.title ?? '',
+        )
+      : undefined;
 
     try {
       console.info('[WEB_CAP] executing script', {
@@ -235,23 +248,28 @@ class RuntimeClient {
           scriptDefinition,
           input,
           scriptRegistry,
+          evidenceOptions,
         );
       } catch (error) {
         if (!isExecutionInterruptedByNavigationError(error)) {
           throw error;
         }
 
-        const evidence = this.createNavigationInterruptedEvidence(activeTab.url);
+        const resultEvidence = collectEvents
+          ? this.createNavigationInterruptedEvidence(activeTab.url)
+          : this.createEmptyExecutionEvidence();
         await this.wait(300);
-        evidence.events.push(
-          ...(await this.finishExecutionObservation(observation, evidence.events)),
-        );
+        if (observation) {
+          resultEvidence.events.push(
+            ...(await this.finishExecutionObservation(observation, resultEvidence.events)),
+          );
+        }
         this.send(
           createRuntimeEnvelope(
             'execution_result',
             {
               result: { navigated: true },
-              evidence,
+              evidence: resultEvidence,
               status: 'interrupted',
             },
             { sessionId: this.sessionId, requestId },
@@ -261,9 +279,7 @@ class RuntimeClient {
       }
 
       const evidence: ExecutionEvidence = response.evidence ?? {
-        url: activeTab.url,
         events: [],
-        screenshots: [],
       };
 
       if (!response.ok || !response.result) {
@@ -271,10 +287,12 @@ class RuntimeClient {
       }
       const result = response.result;
 
-      await this.wait(300);
-      evidence.events.push(
-        ...(await this.finishExecutionObservation(observation, evidence.events)),
-      );
+      if (observation) {
+        await this.wait(300);
+        evidence.events.push(
+          ...(await this.finishExecutionObservation(observation, evidence.events)),
+        );
+      }
 
       if (evidence.visibleElements) {
         const visibleElementsDebugTiming = (evidence as ExecutionEvidenceWithDebugTiming)
@@ -283,10 +301,6 @@ class RuntimeClient {
         console.info(
           '[WEB_CAP] visible elements diff json',
           JSON.stringify(evidence.visibleElements, null, 2),
-        );
-        console.info(
-          '[WEB_CAP] visible elements diff timing ms',
-          evidence.visibleElementsTimingMs ?? null,
         );
         if (visibleElementsDebugTiming) {
           console.info(
@@ -308,7 +322,9 @@ class RuntimeClient {
         ),
       );
     } catch (error) {
-      this.cancelExecutionObservation(observation);
+      if (observation) {
+        this.cancelExecutionObservation(observation);
+      }
       this.sendError(
         requestId,
         'EXECUTION_FAILED',
@@ -342,6 +358,7 @@ class RuntimeClient {
     scriptDefinition: ScriptDefinition,
     input: Record<string, unknown>,
     scriptRegistry: ScriptDefinition[],
+    evidence: ExecutionEvidenceOption[],
   ): Promise<ScriptExecutionResponse> {
     const requiresBrowserLevelClick = scriptRequiresBrowserLevelClick(
       scriptDefinition,
@@ -368,6 +385,7 @@ class RuntimeClient {
         scriptDefinition,
         input,
         scriptRegistry,
+        evidence,
       );
     }
 
@@ -381,6 +399,7 @@ class RuntimeClient {
         scriptDefinition,
         input,
         scriptRegistry,
+        evidence,
       );
     } catch (error) {
       if (
@@ -395,6 +414,7 @@ class RuntimeClient {
         scriptDefinition,
         input,
         scriptRegistry,
+        evidence,
       );
     }
   }
@@ -460,7 +480,7 @@ class RuntimeClient {
     });
 
     browser.tabs.onUpdated.addListener(
-      async (_tabId: number, changeInfo: { status?: string; url?: string }) => {
+      async (_tabId: number, changeInfo: { status?: string; title?: string; url?: string }) => {
         this.recordExecutionTabUpdate(_tabId, changeInfo);
         if (changeInfo.status === 'complete') {
           await this.refreshExecutionTabIndicator(_tabId);
@@ -675,11 +695,13 @@ class RuntimeClient {
     requestId: string,
     tabId: number,
     startedUrl: string,
+    startedTitle: string,
   ): ExecutionObservation {
     const observation: ExecutionObservation = {
       requestId,
       tabId,
       startedUrl,
+      startedTitle,
       createdTabs: new Map(),
       targetUpdates: [],
     };
@@ -714,33 +736,43 @@ class RuntimeClient {
 
     const finalTab = await browser.tabs.get(observation.tabId).catch(() => undefined);
     const finalUrl = finalTab?.url ?? observation.startedUrl;
+    const finalTitle = finalTab?.title ?? observation.startedTitle;
     const observedUrl =
       [...observation.targetUpdates]
         .reverse()
         .find((update) => typeof update.url === 'string' && update.url.length > 0)?.url ??
       finalUrl;
+    const observedTitle =
+      [...observation.targetUpdates]
+        .reverse()
+        .find((update) => typeof update.title === 'string')?.title ??
+      finalTitle;
 
     const hasLoadingUpdate = observation.targetUpdates.some(
       (update) => update.status === 'loading',
     );
-    if (observedUrl && observedUrl !== observation.startedUrl) {
-      const hasEquivalentHistoryEvent = [...existingEvents, ...events].some(
+    const pageChangedEvent = buildPageChangedEvent({
+      startedUrl: observation.startedUrl,
+      observedUrl,
+      startedTitle: observation.startedTitle,
+      observedTitle,
+      tabId: observation.tabId,
+      mode: 'navigation',
+    });
+    if (pageChangedEvent) {
+      const pageChangedToUrl = (pageChangedEvent.value as { to: { url?: string } }).to.url;
+      const existingPageChanged = [...existingEvents, ...events].find(
         (event) =>
-          event.type === 'page_url_changed' &&
+          event.type === 'page_changed' &&
           typeof event.value === 'object' &&
           event.value !== null &&
-          (event.value as { to?: unknown }).to === observedUrl,
+          typeof (event.value as { to?: { url?: unknown } }).to?.url === 'string' &&
+          (event.value as { to?: { url?: unknown } }).to?.url === pageChangedToUrl,
       );
-      if (!hasEquivalentHistoryEvent) {
-        events.push({
-          type: 'page_url_changed',
-          value: {
-            from: observation.startedUrl,
-            to: observedUrl,
-            mode: 'navigation',
-            tabId: observation.tabId,
-          },
-        });
+      if (existingPageChanged) {
+        mergePageChangedEvent(existingPageChanged, pageChangedEvent);
+      } else {
+        events.push(pageChangedEvent);
       }
     } else if (hasLoadingUpdate) {
       events.push({
@@ -767,13 +799,14 @@ class RuntimeClient {
 
   private recordExecutionTabUpdate(
     tabId: number,
-    changeInfo: { status?: string; url?: string },
+    changeInfo: { status?: string; title?: string; url?: string },
   ): void {
     for (const observation of this.executionObservations) {
       if (observation.createdTabs.has(tabId)) {
         const existing = observation.createdTabs.get(tabId) ?? { id: tabId };
         observation.createdTabs.set(tabId, {
           ...existing,
+          title: changeInfo.title ?? existing.title,
           url: changeInfo.url ?? existing.url,
         });
       }
@@ -785,6 +818,7 @@ class RuntimeClient {
       observation.targetUpdates.push({
         tabId,
         status: changeInfo.status,
+        title: changeInfo.title,
         url: changeInfo.url,
       });
     }
@@ -792,9 +826,13 @@ class RuntimeClient {
 
   private createNavigationInterruptedEvidence(startedUrl: string): ExecutionEvidence {
     return {
-      url: startedUrl,
       events: [{ type: 'execution_interrupted_by_navigation', value: { url: startedUrl } }],
-      screenshots: [],
+    };
+  }
+
+  private createEmptyExecutionEvidence(): ExecutionEvidence {
+    return {
+      events: [],
     };
   }
 
@@ -867,6 +905,87 @@ function clearExecutionTabIndicatorScript(titlePrefix: string): void {
   if (document.title.startsWith(normalizedPrefix)) {
     document.title = document.title.slice(normalizedPrefix.length);
   }
+}
+
+function buildPageChangedEvent(input: {
+  startedUrl: string;
+  observedUrl?: string;
+  startedTitle: string;
+  observedTitle?: string;
+  tabId: number;
+  mode: 'history' | 'navigation';
+  method?: string;
+}): ExecutionEvidenceEvent | undefined {
+  const from: { title?: string; url?: string } = {};
+  const to: { title?: string; url?: string } = {};
+
+  if (input.observedUrl && input.observedUrl !== input.startedUrl) {
+    from.url = input.startedUrl;
+    to.url = input.observedUrl;
+  }
+
+  if (input.observedTitle !== undefined && input.observedTitle !== input.startedTitle) {
+    from.title = input.startedTitle;
+    to.title = input.observedTitle;
+  }
+
+  if (Object.keys(to).length === 0) {
+    return undefined;
+  }
+
+  return {
+    type: 'page_changed',
+    value: {
+      from,
+      to,
+      tabId: input.tabId,
+      mode: input.mode,
+      ...(input.method ? { method: input.method } : {}),
+    },
+  };
+}
+
+function mergePageChangedEvent(
+  existingEvent: ExecutionEvidenceEvent,
+  nextEvent: ExecutionEvidenceEvent,
+): void {
+  if (
+    typeof existingEvent.value !== 'object' ||
+    existingEvent.value === null ||
+    typeof nextEvent.value !== 'object' ||
+    nextEvent.value === null
+  ) {
+    return;
+  }
+
+  const existing = existingEvent.value as {
+    from?: { title?: string; url?: string };
+    to?: { title?: string; url?: string };
+  };
+  const next = nextEvent.value as {
+    from?: { title?: string; url?: string };
+    to?: { title?: string; url?: string };
+  };
+
+  existing.from = {
+    ...(existing.from ?? {}),
+    ...(next.from ?? {}),
+  };
+  existing.to = {
+    ...(existing.to ?? {}),
+    ...(next.to ?? {}),
+  };
+}
+
+function shouldCollectExecutionEvidence(
+  evidence: ExecutionEvidenceOption[] | undefined,
+  option: Exclude<ExecutionEvidenceOption, 'common' | 'all'>,
+): boolean {
+  return Boolean(
+    evidence?.includes('all') ||
+      evidence?.includes('common') ||
+      evidence?.includes(option),
+  );
 }
 
 export default defineBackground(() => {

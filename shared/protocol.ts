@@ -1,4 +1,4 @@
-import type { ScriptDefinition, ScriptType } from './script-schema';
+import type { ScriptDefinition } from './script-schema';
 
 export const DEFAULT_RUNTIME_PORT = 38947;
 export { DEFAULT_EXECUTION_TIMEOUT_MS, MAX_EXECUTION_TIMEOUT_MS } from './script-schema';
@@ -32,6 +32,12 @@ export interface RuntimeTabSnapshot {
   updatedAt: string;
 }
 
+export interface RuntimeTabSummary {
+  tabId?: number;
+  url: string;
+  title: string;
+}
+
 export interface RuntimeHelloPayload {
   browserName: string;
   extensionVersion: string;
@@ -57,6 +63,7 @@ export interface ExecuteScriptPayload {
   scriptRegistry: ScriptDefinition[];
   tabId?: number;
   activateTab?: boolean;
+  evidence?: ExecutionEvidenceOption[];
 }
 
 export interface BrowserCommandPayload {
@@ -98,10 +105,11 @@ export interface ExecutionEvidenceEvent {
 export interface ExecutionEvidence {
   url?: string;
   events: ExecutionEvidenceEvent[];
-  screenshots: string[];
+  screenshots?: string[];
   visibleElements?: VisibleElementDiff;
-  visibleElementsTimingMs?: number;
 }
+
+export type ExecutionEvidenceOption = 'events' | 'visibleElements' | 'common' | 'all';
 
 export interface ExecutionResultPayload {
   result: Record<string, unknown>;
@@ -220,13 +228,12 @@ export type RuntimeEnvelope =
 
 export interface ScriptExecutionResult {
   scriptId: string;
-  scriptType: ScriptType;
   status: 'succeeded' | 'failed' | 'interrupted';
   result: Record<string, unknown>;
   notice?: string;
   evidence: ExecutionEvidence;
   timingMs: number;
-  tab: RuntimeTabSnapshot;
+  tab?: RuntimeTabSummary;
 }
 
 export interface ScriptExecutionHistoryEntry {
@@ -278,6 +285,8 @@ export interface ExecuteScriptOptions {
   tabId?: number;
   scriptRegistry?: ScriptDefinition[];
   activateTab?: boolean;
+  evidence?: ExecutionEvidenceOption[];
+  includeTabInResult?: boolean;
 }
 
 export function createRuntimeEnvelope<T extends RuntimeEnvelope['type']>(

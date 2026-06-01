@@ -207,7 +207,17 @@ jobs:
       - name: Smoke test CLI
         run: node dist/cli.js --help
 
+      - name: Determine npm dist-tag
+        id: npm-dist-tag
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if [[ "$version" == *-* ]]; then
+            echo "tag=beta" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=latest" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Publish to npm
-        run: npm publish --access=public
+        run: npm publish --access=public --tag "${{ steps.npm-dist-tag.outputs.tag }}"
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

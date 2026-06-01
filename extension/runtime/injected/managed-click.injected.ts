@@ -700,13 +700,21 @@ export function installManagedClickHook(
     return { clientX, clientY };
   }
 
-  function describeElement(element: HTMLElement) {
-    return {
-      tagName: element.tagName.toLowerCase(),
-      id: element.id || '',
-      className: element.className || '',
-      text: (element.textContent || '').trim().slice(0, 120),
+  function describeElement(element: Element) {
+    const description: Record<string, string> = {
+      tag: element.tagName.toLowerCase(),
     };
+    if (element.id) {
+      description.id = element.id;
+    }
+    if (element instanceof HTMLElement && element.className) {
+      description.class = element.className;
+    }
+    const text = (element.textContent || '').trim().slice(0, 120);
+    if (text) {
+      description.text = text;
+    }
+    return description;
   }
 
   function pointsAreClose(first: ManagedClickPoint | null | undefined, second: ManagedClickPoint | null | undefined) {
@@ -889,37 +897,39 @@ export function installManagedClickHook(
         };
         const hitTargetRect =
           hitTarget instanceof Element ? captureRectSnapshot(hitTarget) : null;
-        const targetDescriptor = {
-          source,
-          action,
-          rect: simplifyRectSnapshot(rect),
-          clickableRect: simplifyRectSnapshot(clickableRect),
-          scrolled: rectResult.scrolled,
-          rectStabilized: rectResult.stabilized,
-          hitTarget:
-            hitTarget instanceof Element
-              ? {
-                  tagName: hitTarget.tagName.toLowerCase(),
-                  id: hitTarget.id || '',
-                  className:
-                    hitTarget instanceof HTMLElement ? hitTarget.className || '' : '',
-                  text: (hitTarget.textContent || '').trim().slice(0, 120),
-                  rect: simplifyRectSnapshot(hitTargetRect),
-                  containsOriginal:
-                    hitTarget === element ||
-                    (hitTarget instanceof HTMLElement && hitTarget.contains(element)) ||
-                    element.contains(hitTarget),
-                }
-              : null,
-        };
-
-        evidence.events.push({
-          type: 'managed_click',
-          value: {
+        const containsOriginal =
+          hitTarget === element ||
+          (hitTarget instanceof HTMLElement && hitTarget.contains(element)) ||
+          element.contains(hitTarget);
+        const targetDescriptor: Record<string, unknown> = {
+          target: hitTarget instanceof Element ? describeElement(hitTarget) : null,
+          point: {
             x: Math.round(clientX),
             y: Math.round(clientY),
-            ...targetDescriptor,
           },
+          rect: simplifyRectSnapshot(rect),
+        };
+
+        if (action !== 'click') {
+          targetDescriptor.action = action;
+        }
+
+        if (rectResult.scrolled) {
+          targetDescriptor.scrolled = true;
+        }
+
+        if (!rectResult.stabilized) {
+          targetDescriptor.rectStabilized = false;
+        }
+
+        if (!containsOriginal) {
+          targetDescriptor.containsOriginal = false;
+          targetDescriptor.hitTargetRect = simplifyRectSnapshot(hitTargetRect);
+        }
+
+        evidence.events.push({
+          type: action === 'click' ? 'managed_click' : 'managed_mouse',
+          value: targetDescriptor,
         });
         console.info('[WEB_CAP] managed click details', targetDescriptor);
 

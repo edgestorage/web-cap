@@ -11,16 +11,36 @@ const DEFAULT_HISTORY_LIMIT = 100;
 const DEFAULT_LOCK_TIMEOUT_MS = 2_000;
 const DEFAULT_LOCK_RETRY_MS = 25;
 
+interface StoredScriptExecutionHistoryEntry
+  extends Omit<ScriptExecutionHistoryEntry, 'script'> {
+  scriptPath: string;
+}
+
 interface ScriptExecutionHistoryFile {
   nextSequence: number;
-  entries: ScriptExecutionHistoryEntry[];
+  entries: StoredScriptExecutionHistoryEntry[];
+}
+
+type LegacyScriptExecutionHistoryEntry =
+  | ScriptExecutionHistoryEntry
+  | StoredScriptExecutionHistoryEntry;
+
+interface LegacyScriptExecutionHistoryFile {
+  nextSequence: number;
+  entries: LegacyScriptExecutionHistoryEntry[];
 }
 
 export class ScriptExecutionHistory {
+  private readonly filePath: string;
+  private readonly scriptsDir: string;
+
   constructor(
-    private readonly filePath = join(resolveWebCapStateDir(), 'script-execution-history.json'),
+    historyPath = join(resolveWebCapStateDir(), 'script-execution-history.json'),
     private readonly limit = DEFAULT_HISTORY_LIMIT,
-  ) {}
+  ) {
+    this.filePath = historyPath.endsWith('.json') ? historyPath : `${historyPath}.json`;
+    this.scriptsDir = join(this.filePath.slice(0, -'.json'.length), 'scripts');
+  }
 
   async reserve(
     script: string,
@@ -45,8 +65,8 @@ export class ScriptExecutionHistory {
       };
 
       state.nextSequence += 1;
-      state.entries.unshift(entry);
-      state.entries = trimHistoryEntries(state.entries, this.limit);
+      state.entries.unshift(await this.storeEntry(entry));
+      await this.trimState(state);
       await this.writeState(state);
       return entry;
     });
@@ -106,12 +126,14 @@ export class ScriptExecutionHistory {
 
   async get(localScriptId: string): Promise<ScriptExecutionHistoryEntry | null> {
     const state = await this.readState();
-    return state.entries.find((entry) => entry.localScriptId === localScriptId) ?? null;
+    const entry = state.entries.find((item) => item.localScriptId === localScriptId);
+    return entry ? await this.hydrateEntry(entry) : null;
   }
 
   async list(): Promise<ScriptExecutionHistoryEntry[]> {
     const state = await this.readState();
-    return trimHistoryEntries(state.entries, this.limit);
+    const entries = trimHistoryEntries(state.entries, this.limit);
+    return await Promise.all(entries.map((entry) => this.hydrateEntry(entry)));
   }
 
   private async update(
@@ -125,9 +147,14 @@ export class ScriptExecutionHistory {
         throw new Error(`Script execution history entry ${localScriptId} was not found.`);
       }
 
-      const updated = apply(state.entries[index]);
-      state.entries[index] = updated;
-      state.entries = trimHistoryEntries(state.entries, this.limit);
+      const existing = await this.hydrateEntry(state.entries[index]);
+      const updated = apply(existing);
+      const stored = await this.storeEntry(updated);
+      if (stored.scriptPath !== state.entries[index].scriptPath) {
+        await removeFileWithRetries(state.entries[index].scriptPath);
+      }
+      state.entries[index] = stored;
+      await this.trimState(state);
       await this.writeState(state);
       return updated;
     });
@@ -136,13 +163,26 @@ export class ScriptExecutionHistory {
   private async readState(): Promise<ScriptExecutionHistoryFile> {
     try {
       const raw = await readFile(this.filePath, 'utf8');
-      const parsed = JSON.parse(raw) as Partial<ScriptExecutionHistoryFile>;
+      const parsed = JSON.parse(raw) as Partial<LegacyScriptExecutionHistoryFile>;
       const nextSequence =
         typeof parsed.nextSequence === 'number' && parsed.nextSequence > 0
           ? Math.floor(parsed.nextSequence)
           : 1;
       const entries = Array.isArray(parsed.entries) ? parsed.entries : [];
-      return { nextSequence, entries };
+      const migrated = entries.some(
+        (entry) =>
+          !('scriptPath' in entry) ||
+          typeof entry.scriptPath !== 'string' ||
+          'script' in entry,
+      );
+      const state = {
+        nextSequence,
+        entries: await Promise.all(entries.map((entry) => this.normalizeStoredEntry(entry))),
+      };
+      if (migrated) {
+        await this.writeState(state);
+      }
+      return state;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
         return { nextSequence: 1, entries: [] };
@@ -158,7 +198,61 @@ export class ScriptExecutionHistory {
     await rename(tempFilePath, this.filePath);
   }
 
+  private async normalizeStoredEntry(
+    entry: LegacyScriptExecutionHistoryEntry,
+  ): Promise<StoredScriptExecutionHistoryEntry> {
+    if ('scriptPath' in entry && typeof entry.scriptPath === 'string') {
+      const { script: _script, ...stored } = entry as StoredScriptExecutionHistoryEntry & {
+        script?: string;
+      };
+      return stored;
+    }
+
+    return await this.storeEntry(entry as ScriptExecutionHistoryEntry);
+  }
+
+  private async hydrateEntry(
+    entry: StoredScriptExecutionHistoryEntry,
+  ): Promise<ScriptExecutionHistoryEntry> {
+    return {
+      ...entry,
+      script: await readFile(entry.scriptPath, 'utf8'),
+    };
+  }
+
+  private async storeEntry(
+    entry: ScriptExecutionHistoryEntry,
+  ): Promise<StoredScriptExecutionHistoryEntry> {
+    const scriptPath = this.scriptPathForEntry(entry.localScriptId);
+    await mkdir(dirname(scriptPath), { recursive: true });
+    const tempFilePath = `${scriptPath}.${process.pid}.${Date.now()}.tmp`;
+    await writeFile(tempFilePath, entry.script, 'utf8');
+    await rename(tempFilePath, scriptPath);
+
+    const { script: _script, ...stored } = entry;
+    return {
+      ...stored,
+      scriptPath,
+    };
+  }
+
+  private async trimState(state: ScriptExecutionHistoryFile): Promise<void> {
+    const keptEntries = trimHistoryEntries(state.entries, this.limit);
+    const keptPaths = new Set(keptEntries.map((entry) => entry.scriptPath));
+    await Promise.all(
+      state.entries
+        .filter((entry) => !keptPaths.has(entry.scriptPath))
+        .map((entry) => removeFileWithRetries(entry.scriptPath)),
+    );
+    state.entries = keptEntries;
+  }
+
+  private scriptPathForEntry(localScriptId: string): string {
+    return join(this.scriptsDir, `${sanitizePathSegment(localScriptId)}.js`);
+  }
+
   private async withLock<T>(task: () => Promise<T>): Promise<T> {
+    await mkdir(dirname(this.filePath), { recursive: true });
     const lockDir = `${this.filePath}.lock`;
     const startedAt = Date.now();
 
@@ -187,6 +281,29 @@ export class ScriptExecutionHistory {
   }
 }
 
+async function removeFileWithRetries(path: string): Promise<void> {
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    try {
+      await rm(path, { force: true });
+      return;
+    } catch (error) {
+      if (!isRetryableRemoveError(error) || attempt === 29) {
+        throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100 + attempt * 25));
+    }
+  }
+}
+
+function isRetryableRemoveError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error.code === 'EBUSY' || error.code === 'EPERM' || error.code === 'ENOTEMPTY')
+  );
+}
+
 function formatLocalScriptId(sequence: number): string {
   return `temp.script.${String(sequence).padStart(6, '0')}`;
 }
@@ -199,11 +316,11 @@ function failMissingHistoryEntry(localScriptId: string): never {
   throw new Error(`Script execution history entry ${localScriptId} was not found.`);
 }
 
-function trimHistoryEntries(
-  entries: ScriptExecutionHistoryEntry[],
+function trimHistoryEntries<T extends { status: ScriptExecutionHistoryEntry['status'] }>(
+  entries: T[],
   limit: number,
-): ScriptExecutionHistoryEntry[] {
-  const trimmed: ScriptExecutionHistoryEntry[] = [];
+): T[] {
+  const trimmed: T[] = [];
   let completedCount = 0;
 
   for (const entry of entries) {
@@ -219,6 +336,10 @@ function trimHistoryEntries(
   }
 
   return trimmed;
+}
+
+function sanitizePathSegment(value: string): string {
+  return value.replace(/[^a-zA-Z0-9._-]+/g, '_') || 'unknown';
 }
 
 function serializeError(error: unknown): { message: string; code?: string } {

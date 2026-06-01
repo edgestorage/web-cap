@@ -1,6 +1,6 @@
 /* eslint-disable */
 import type { LocatorQuery, PlaywrightShimDeps, RuntimeMethodTable, ScriptPlaywrightLocator, ScriptPlaywrightPage } from './playwright-shim-types.injected';
-import { accessibleName, cssEscape, hideHighlightOverlay, implicitRole, isVisibleElement, notImplemented, pressKeyOnElement, showHighlightOverlay, smallestTextMatches, textMatches, timeoutFromOptions, waitForLocator } from './playwright-shim-helpers.injected';
+import { accessibleName, cssEscape, hideHighlightOverlay, implicitRole, isVisibleElement, notImplemented, pressKeyOnElement, queryLocatorSelectorAll, showHighlightOverlay, smallestTextMatches, textMatches, timeoutFromOptions, waitForLocator } from './playwright-shim-helpers.injected';
 
 const PLAYWRIGHT_LOCATOR_METHODS = [
   'elementHandle',
@@ -432,7 +432,7 @@ export function createLocator(
         throw new Error('locator.locator only supports string selectors in Web Cap script runtime.');
       }
       return createLocator(
-        () => query().flatMap((element) => [...element.querySelectorAll(selector)]),
+        () => query().flatMap((element) => queryLocatorSelectorAll(selector, element)),
         `${label}.locator(${selector})`,
         pageApi,
         deps,

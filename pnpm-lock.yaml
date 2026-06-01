@@ -23,6 +23,9 @@ importers:
       diff-dom:
         specifier: ^5.2.1
         version: 5.2.1
+      ivya:
+        specifier: 1.8.2
+        version: 1.8.2
       tinyglobby:
         specifier: ^0.2.16
         version: 0.2.16
@@ -1749,6 +1752,9 @@ packages:
   isobject@3.0.1:
     resolution: {integrity: sha512-WhB9zCku7EGTj/HQQRz5aUQEUeoQZH2bWcltRErOpymJ4boYE6wL9Tbr23krRPSZ+C5zqNSrSw+Cc7sZZ4b7vg==}
     engines: {node: '>=0.10.0'}
+
+  ivya@1.8.2:
+    resolution: {integrity: sha512-9pGI1dtJbK2U+fpUoV95SL9slfrF2EM4p0Sf6EddYJwmMttBKijGOxCXibSCg8UKhmVwMx5CaDZ2PXinrcGfbA==}
 
   jiti@2.6.1:
     resolution: {integrity: sha512-ekilCSN1jwRvIbgeg/57YFh8qQDNbwDb9xT/qu2DAHbFFZUicIl4ygVaAvzveMhMVr3LnpSKTNnwt8PoOfmKhQ==}
@@ -4405,6 +4411,8 @@ snapshots:
   isexe@2.0.0: {}
 
   isobject@3.0.1: {}
+
+  ivya@1.8.2: {}
 
   jiti@2.6.1: {}
 

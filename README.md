@@ -42,11 +42,11 @@ Compared with action-first browser tools, Web Cap focuses on:
 - In-page execution, so scripts can work directly with the DOM and page state.
 - Reusable capabilities, so successful scripts can be searched, inspected, and called again.
 - Composable scripts, so one script can call another through `cap.call(...)`.
-- Post-execution observation, so each script run can return evidence about what changed on the page.
+- Optional post-execution observation, so script runs can return evidence about what changed on the page when evidence collection is enabled.
 - Local persistence, so agent-learned workflows can survive beyond a single run.
 - CLI access, so agents can use the same browser capabilities from normal command-line workflows.
 
-Web Cap observes the page around script execution. It snapshots visible elements before a script runs, tracks DOM mutations while it runs, then snapshots changed areas afterward and returns a visible-elements diff with `added`, `removed`, and `updated` items. Execution evidence can also include browser-side events such as opened tabs, URL changes, reloads, scroll changes, managed clicks, keyboard input, and script calls.
+Web Cap can observe the page around script execution when evidence collection is enabled. It snapshots visible elements before a script runs, tracks DOM mutations while it runs, then snapshots changed areas afterward and returns a visible-elements diff with `added`, `removed`, and `updated` items. Execution evidence can also include browser-side events such as opened tabs, URL changes, reloads, scroll changes, managed clicks, keyboard input, and script calls. Evidence collection defaults to `common`, which includes events and visible element diffs but excludes noisy `managed_mouse` events. Configure selected parts with `web-cap config set evidence events,visibleElements`, `web-cap config set evidence common`, `web-cap config set evidence all`, or pass `options.evidence` to `script_execute`.
 
 That means an agent does not only get a script's declared JSON result. It can also inspect what the browser visibly did after the script, which is useful for verification, recovery, and deciding whether a newly successful script should be registered as a reusable capability.
 
@@ -54,7 +54,7 @@ That means an agent does not only get a script's declared JSON result. It can al
 
 - Page targeting: script definitions include target sites, URL patterns, page hints, tags, type, status, and version, so agents can search for the right capability and avoid running a script on the wrong page.
 - Two script types: `read` scripts inspect or extract page state, while `act` scripts operate on the page or trigger browser-side changes.
-- Event streaming: `wait-events` streams browser page events as JSON Lines, which gives agents a lightweight way to watch clicks, input/change/submit activity, URL changes, and loading state.
+- User handoff observation: `wait-events` waits while a user completes a browser action, then streams the resulting interaction path as JSON Lines. Use it when an agent has reached a step that requires user action and needs the observed clicks, input/change/submit activity, URL changes, or loading state to infer what the user did next.
 - Local execution history: inline scripts are tracked locally with status and result metadata. Temporary script ids remain callable while they are in the latest local history entries.
 - Success-gated registration: `--register` only persists a script when its execution result includes `ok: true`, which helps keep the reusable script registry clean.
 - Tab-aware execution: commands can target a specific `--tab-id`, while default execution follows the active connected browser tab.
@@ -122,40 +122,24 @@ Run CLI commands from an agent or terminal:
 
 ```bash
 pnpm cli session-status
-pnpm cli script-search "inspect page" --type read --site generic-web
-pnpm cli script-get builtin.page.inspect
 ```
 
 A typical agent flow is:
 
-1. Use `script-search` to find a reusable script.
-2. Use `script-get` to inspect its input and output schema.
-3. Use `script-execute` to run it against the connected browser.
-4. Use `script-register` when a script should become reusable.
+1. Use `script-execute` to run script code against the connected browser.
+2. Add `--register` to `script-execute` when a successful inline script should become reusable.
 
 ## CLI Commands
-
-### `script-search`
-
-Search callable built-in and locally registered scripts. Searching first is recommended because reusable scripts usually make browser work faster and more reliable.
-
-### `script-get`
-
-Read one script definition and return its callable schema summary, including `scriptId`, `name`, `description`, `inputSchema`, and `outputSchema`.
 
 ### `script-execute`
 
 Execute script code in the selected browser tab. Scripts receive one object argument and return one JSON object.
 
-`script-execute` accepts optional execution settings such as `--timeout-ms`, `--script-file`, and `--input-file`. During execution, scripts can call other scripts through `cap.call(scriptId, input)`.
-
-### `script-register`
-
-Register a reusable script definition with metadata, input JSON schema, output JSON schema, and script function code. The output schema must declare an `ok` property and include `ok` in `required`.
+`script-execute` accepts optional execution settings such as `--timeout-ms`, `--script-file`, `--input-file`, and `--register`. During execution, scripts can call other scripts through `cap.call(scriptId, input)`. `--register` saves the inline script only after execution succeeds with `ok: true`.
 
 ### Browser commands
 
-Web Cap also includes commands such as `browser-new-tab`, `session-status`, and `wait-events` for agent workflows that need tab control or browser event observation.
+Web Cap also includes commands such as `browser-new-tab`, `session-status`, and `wait-events` for agent workflows that need tab control, or need to wait for a user to complete a browser step and inspect the resulting action path.
 
 ## Script Model
 
@@ -205,6 +189,7 @@ Use files for larger payloads:
 
 ```bash
 pnpm cli script-execute \
+  --tab-id 1 \
   --script-file ./script.js \
   --input-file ./input.json
 ```
@@ -213,14 +198,12 @@ Common CLI commands:
 
 ```bash
 pnpm cli session-status
-pnpm cli script-search "inspect page" --type read --site generic-web
-pnpm cli script-get builtin.page.inspect
-pnpm cli script-register --definition-file ./script-definition.json
+pnpm cli script-execute --tab-id 1 --script-file ./script.js --input-file ./input.json --register
 pnpm cli browser-new-tab --url https://example.com --active true
 pnpm cli wait-events --duration-ms 10000
 ```
 
-Use `--compact` on JSON-producing commands to print compact single-line JSON.
+JSON-producing commands print compact single-line JSON by default. Use `--pretty` to print formatted JSON for visual inspection.
 
 ## Local State
 

@@ -61,23 +61,6 @@ export const scriptDefinitionSchema = z.object({
 });
 export type ScriptDefinition = z.infer<typeof scriptDefinitionSchema>;
 
-export const scriptSearchFiltersSchema = z.object({
-  type: scriptTypeSchema.optional(),
-  site: z.string().optional(),
-});
-export type ScriptSearchFilters = z.infer<typeof scriptSearchFiltersSchema>;
-
-export const scriptSearchResultSchema = z.object({
-  scriptId: z.string(),
-  name: z.string(),
-  summary: z.string(),
-  type: scriptTypeSchema,
-  site: z.string(),
-  tags: z.array(z.string()),
-  score: z.number(),
-});
-export type ScriptSearchResult = z.infer<typeof scriptSearchResultSchema>;
-
 export const cloudScriptRecordSchema = z.object({
   id: z.string().min(1),
   scriptDefinition: scriptDefinitionSchema,

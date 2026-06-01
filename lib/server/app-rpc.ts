@@ -1,9 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { WebSocket, WebSocketServer } from 'ws';
 import type {
-  ScriptSearchFilters,
-  ScriptSearchResult,
-  CloudScriptRecord,
   ScriptDefinition,
 } from '@shared/script-schema';
 import type {
@@ -16,7 +13,6 @@ import type {
   CreateTabInput,
   WaitEventsInput,
 } from '@shared/browser-command-contracts';
-import type { ScriptSchemaSummary } from '@shared/validation';
 import { delay, formatError, startDetachedDaemon } from '../daemon-bootstrap';
 import type {
   ExecuteScriptRequest,
@@ -213,14 +209,6 @@ export class WebCapRpcServer {
           buildId: this.options.buildId,
           pid: process.pid,
         } satisfies HealthResponse;
-      case 'scriptSearch': {
-        const params = parseRpcInput(request.method, request.params);
-        return await this.app.scriptSearch(params.query, params.filters);
-      }
-      case 'scriptGet': {
-        const params = parseRpcInput(request.method, request.params);
-        return await this.app.scriptGet(params.scriptId, params.version);
-      }
       case 'sessionStatus':
         return await this.app.sessionStatus();
       case 'browserNewTab': {
@@ -241,10 +229,6 @@ export class WebCapRpcServer {
       }
       case 'scriptRegistryList':
         return await this.app.scriptRegistryList();
-      case 'scriptRegister': {
-        const params = parseRpcInput(request.method, request.params);
-        return await this.app.scriptRegister(params.scriptDefinition);
-      }
     }
   }
 }
@@ -270,23 +254,6 @@ export class WebCapRpcClient {
     this.socket = undefined;
     this.connectPromise = undefined;
     this.rejectPending(new Error('WEB_CAP agent RPC client closed.'));
-  }
-
-  async scriptSearch(
-    query: string,
-    filters?: ScriptSearchFilters,
-  ): Promise<ScriptSearchResult[]> {
-    return (await this.request('scriptSearch', { query, filters })) as ScriptSearchResult[];
-  }
-
-  async scriptGet(
-    scriptId: string,
-    version?: string,
-  ): Promise<ScriptSchemaSummary> {
-    return (await this.request('scriptGet', {
-      scriptId,
-      version,
-    })) as ScriptSchemaSummary;
   }
 
   async sessionStatus(): Promise<RuntimeSessionSnapshot> {
@@ -334,10 +301,6 @@ export class WebCapRpcClient {
 
   async scriptRegistryList(): Promise<ScriptDefinition[]> {
     return (await this.request('scriptRegistryList')) as ScriptDefinition[];
-  }
-
-  async scriptRegister(scriptDefinition: unknown): Promise<CloudScriptRecord> {
-    return (await this.request('scriptRegister', { scriptDefinition })) as CloudScriptRecord;
   }
 
   private async request(

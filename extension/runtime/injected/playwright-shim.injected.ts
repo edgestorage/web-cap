@@ -1,7 +1,7 @@
 /* eslint-disable */
 import type { PlaywrightShimDeps, RuntimeMethodTable, ScriptPlaywrightPage } from './playwright-shim-types.injected';
 import { createLocator } from './playwright-locator.injected';
-import { cssEscape, hideHighlightOverlay, notImplemented, timeoutFromOptions, waitForLocator } from './playwright-shim-helpers.injected';
+import { cssEscape, hideHighlightOverlay, notImplemented, queryLocatorSelectorAll, timeoutFromOptions, waitForLocator } from './playwright-shim-helpers.injected';
 
 export function createPlaywrightPageApi(deps: PlaywrightShimDeps): ScriptPlaywrightPage {
 let defaultTimeoutMs = 5000;
@@ -203,7 +203,11 @@ function createPageApi(): ScriptPlaywrightPage {
       }
       mouseState.x = targetX;
       mouseState.y = targetY;
-      recordMouseAction('move', { steps });
+      recordMouseAction('move', {
+        from: { x: startX, y: startY },
+        to: { x: targetX, y: targetY },
+        steps,
+      });
     },
     async down(options: { button?: unknown; clickCount?: unknown } = {}) {
       const button = mouseButtonName(options.button);
@@ -515,7 +519,10 @@ function createPageApi(): ScriptPlaywrightPage {
           return createCdpFrameLocator(metadata.id, selector, `frame(${metadata.id}).locator(${selector})`);
         }
         return createLocator(
-          () => [...(frameDocument(frameElement)?.querySelectorAll(selector) ?? [])],
+          () => {
+            const doc = frameDocument(frameElement);
+            return doc ? queryLocatorSelectorAll(selector, doc.documentElement) : [];
+          },
           `frame.locator(${selector})`,
           pageApi,
           deps,
@@ -528,7 +535,10 @@ function createPageApi(): ScriptPlaywrightPage {
           return null;
         }
         return await waitForLocator(
-          () => [...(frameDocument(frameElement)?.querySelectorAll(String(selector)) ?? [])],
+          () => {
+            const doc = frameDocument(frameElement);
+            return doc ? queryLocatorSelectorAll(String(selector), doc.documentElement) : [];
+          },
           `frame.waitForSelector(${String(selector)})`,
           deps.wait,
           { timeout: defaultTimeoutMs, ...options },
@@ -658,10 +668,10 @@ function createPageApi(): ScriptPlaywrightPage {
   Object.assign(pageApi, {
     mouse: mouseApi,
     async $(selector: unknown) {
-      return document.querySelector(String(selector));
+      return queryLocatorSelectorAll(String(selector))[0] ?? null;
     },
     async $$(selector: unknown) {
-      return [...document.querySelectorAll(String(selector))];
+      return queryLocatorSelectorAll(String(selector));
     },
     async evaluate(pageFunction: unknown, arg?: unknown) {
       if (typeof pageFunction === 'function') {
@@ -673,7 +683,7 @@ function createPageApi(): ScriptPlaywrightPage {
       throw new Error('page.evaluate requires a function or string expression.');
     },
     async waitForSelector(selector: unknown, options: { state?: 'attached' | 'detached' | 'visible' | 'hidden'; timeout?: number } = {}) {
-      return await waitForLocator(() => [...document.querySelectorAll(String(selector))], `page.waitForSelector(${String(selector)})`, deps.wait, { timeout: defaultTimeoutMs, ...options });
+      return await waitForLocator(() => queryLocatorSelectorAll(String(selector)), `page.waitForSelector(${String(selector)})`, deps.wait, { timeout: defaultTimeoutMs, ...options });
     },
     async addScriptTag(options: { content?: unknown; type?: unknown; url?: unknown } = {}) {
       const script = document.createElement('script');
@@ -782,7 +792,7 @@ function createPageApi(): ScriptPlaywrightPage {
         throw new Error('page.frameLocator only supports string selectors in Web Cap script runtime.');
       }
       const queryFrameDocuments = () =>
-        [...document.querySelectorAll(selector)]
+        queryLocatorSelectorAll(selector)
           .filter((element): element is HTMLIFrameElement => element instanceof HTMLIFrameElement)
           .map((element) => element.contentDocument)
           .filter((item): item is Document => Boolean(item));
@@ -792,7 +802,7 @@ function createPageApi(): ScriptPlaywrightPage {
             throw new Error('frameLocator.locator only supports string selectors in Web Cap script runtime.');
           }
           return createLocator(
-            () => queryFrameDocuments().flatMap((frameDoc) => [...frameDoc.querySelectorAll(innerSelector)]),
+            () => queryFrameDocuments().flatMap((frameDoc) => queryLocatorSelectorAll(innerSelector, frameDoc.documentElement)),
             `page.frameLocator(${selector}).locator(${innerSelector})`,
             pageApi,
             deps,
@@ -891,7 +901,7 @@ function createPageApi(): ScriptPlaywrightPage {
       if (typeof selector !== 'string') {
         throw new Error('page.locator only supports string selectors in Web Cap script runtime.');
       }
-      return createLocator(() => [...document.querySelectorAll(selector)], `page.locator(${selector})`, pageApi, deps);
+      return createLocator(() => queryLocatorSelectorAll(selector), `page.locator(${selector})`, pageApi, deps);
     },
     async mainFrame() {
       const frames = await (pageApi.frames as () => Promise<RuntimeMethodTable[]>)();

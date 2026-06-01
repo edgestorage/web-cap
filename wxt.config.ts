@@ -14,7 +14,8 @@ export default defineConfig({
   manifestVersion: 3,
   manifest: {
     name: 'WEB_CAP',
-    description: 'Browser extension runtime for WEB_CAP MCP web capabilities.',
+    description:
+      'Local-first browser automation runtime for Web Cap CLI to inspect tabs, run scripts, and observe page actions.',
     permissions: ['storage', 'tabs', 'scripting', 'debugger', 'userScripts'],
     host_permissions: ['http://*/*', 'https://*/*'],
     browser_specific_settings: {

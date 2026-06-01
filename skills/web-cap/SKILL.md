@@ -9,6 +9,8 @@ description: Use when you need to operate or inspect a real browser tab through 
 
 Web Cap is a command-line browser automation toolkit for agents. The npm package is `web-capability`, and the installed CLI command is `web-cap`.
 
+Use `web-cap --help` to view all available commands, and `web-cap <command> --help` to inspect options for a specific command.
+
 ## Check And Install
 
 Check whether the Web Cap browser extension/runtime is connected before running page automation:
@@ -23,7 +25,25 @@ If the `web-cap` command is not available, install the CLI:
 npm install -g web-capability
 ```
 
-The browser side requires the Web Cap extension/runtime to be loaded and connected. Re-run `web-cap session-status` after installation or extension setup before executing page scripts.
+The browser side requires the `web_cap` extension/runtime to be loaded and connected. Users can download the browser extension from the latest GitHub Release at `https://github.com/edgestorage/web-cap/releases/latest`. Re-run `web-cap session-status` after installation or extension setup before executing page scripts.
+`script-execute` requires `--tab-id`; use the tab id shown by `session-status`.
+
+## Connection Checks
+
+Before the first page automation step in a task, run:
+
+```bash
+web-cap session-status
+```
+
+Use the result to decide the next step:
+
+- If the `web-cap` command is missing, install the CLI with `npm install -g web-capability`, then run `web-cap session-status` again.
+- If no browser runtime is connected, tell the user to install or enable the `web_cap` extension. The extension can be downloaded from the latest GitHub Release: `https://github.com/edgestorage/web-cap/releases/latest`.
+- If the extension is installed but still disconnected, ask the user to confirm that the `web_cap` extension is enabled and that a normal `http` or `https` tab is open.
+- If `session-status` lists multiple tabs, choose the tab that matches the user's requested title or URL. Do not guess a tab id when the target is ambiguous.
+- If the intended tab is not listed, ask the user to open or focus the target page, then run `web-cap session-status` again.
+- Do not run `script-execute` until you have a specific `--tab-id` from `session-status`.
 
 ## Run Scripts
 
@@ -31,14 +51,14 @@ Prefer running scripts directly with `script-execute`:
 
 ```bash
 web-cap session-status
-web-cap script-execute --script "export default async function () { return { ok: true, title: document.title, url: location.href }; }"
+web-cap script-execute --tab-id <tab-id> --script "export default async function () { return { ok: true, title: document.title, url: location.href }; }"
 ```
 
 Treat Web Cap scripts as reusable browser capabilities, not just throwaway snippets:
 
 1. Check browser context with `session-status` when the active tab matters.
 2. Prefer script files for anything longer than a tiny one-off read.
-3. Execute scripts with `script-execute --script-file <path>` and pass variable data through `--input` or `--input-file`.
+3. Execute scripts with `script-execute --tab-id <tab-id> --script-file <path>` and pass variable data through `--input` or `--input-file`.
 4. Return structured JSON objects, including `ok`, `url`, and `title` when useful.
 
 Use one-off inline scripts only for very small reads such as `document.title`, `location.href`, or a short visible text fragment.
@@ -48,7 +68,8 @@ Use one-off inline scripts only for very small reads such as `document.title`, `
 For reusable automation, write a normal script file and call it whenever needed:
 
 ```javascript
-// scripts/read-page-summary.js
+// scripts/example.com/read-page-summary.js
+// Purpose: Read a compact summary of the current example.com page.
 export default async function (input) {
   const heading = await page.locator("h1").first().textContent().catch(() => "");
   const links = await page.locator("a").evaluateAll((items, limit) =>
@@ -70,8 +91,17 @@ export default async function (input) {
 ```
 
 ```bash
-web-cap script-execute --script-file scripts/read-page-summary.js --input '{"limit":10}'
+web-cap script-execute --tab-id <tab-id> --script-file scripts/example.com/read-page-summary.js --input '{"limit":10}'
 ```
+
+Organize reusable scripts by the site's primary domain:
+
+- Put reusable site scripts under `scripts/<primary-domain>/`, such as `scripts/example.com/read-page-summary.js` or `scripts/github.com/fill-search-form.js`.
+- Use the registrable site domain as the directory name when possible, without protocol, path, or query string.
+- Use action-and-object file names, such as `read-page-summary.js`, `extract-search-results.js`, or `fill-login-form.js`.
+- Add a short purpose comment near the top of each script that describes what the script does and which page or workflow it targets.
+- Prefer `--script-file` for anything longer than a tiny one-off read. Pass variable data through `--input` or `--input-file`.
+- Return an object with at least `ok`. On failure, return `ok: false` with `error`, `details`, `url`, and `title` when available.
 
 ## Script Guidelines
 
@@ -88,7 +118,7 @@ Write scripts as small browser functions with clear boundaries:
 Example one-off read:
 
 ```bash
-web-cap script-execute --script "export default async function () { return { ok: true, title: document.title, url: location.href, text: document.body.innerText.slice(0, 4000) }; }"
+web-cap script-execute --tab-id <tab-id> --script "export default async function () { return { ok: true, title: document.title, url: location.href, text: document.body.innerText.slice(0, 4000) }; }"
 ```
 
 ## Page Operations
@@ -137,4 +167,15 @@ For actions that change a user's account or site state, prefer browser-visible U
 
 Avoid calling a site's private or semi-private HTTP APIs directly, even from the same-origin page context, unless the user explicitly asks for API-based execution or the UI path is unavailable and the tradeoff is explained first.
 
-When opening pages or tabs only to perform an operation, close those temporary pages after the operation and verification are complete, unless the user asked to keep them open or the page is useful context for the next step.
+When opening pages or tabs only to perform an operation, treat them as temporary and close them before finishing the task, after the operation and verification are complete. Do not leave temporary pages open unless the user asked to keep them open or the page is useful context for the next step.
+
+## Tab Selection And Cleanup
+
+Use `web-cap session-status` as the source of truth for available tabs and tab ids:
+
+- Reuse the user's existing target tab when the task is about a page they already opened.
+- Do not close tabs that were already open before the task unless the user explicitly asks.
+- Temporary tabs opened only for lookup, navigation, or verification should be closed after the result is captured.
+- Keep a tab open when it is the deliverable, when the user asked to keep it open, or when the next step depends on the page staying live.
+- Keep a tab open for handoff when it is waiting for user login, approval, payment, CAPTCHA, or another user-only action.
+- If multiple tabs match, prefer a tab whose title or URL clearly matches the user's request. Ask for the target tab when the match is ambiguous.

@@ -1,58 +1,45 @@
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readFile, writeFile } from 'node:fs/promises';
-import { watchFile } from 'node:fs';
-import ts from 'typescript';
+import { writeFile } from 'node:fs/promises';
+import { unwatchFile, watchFile } from 'node:fs';
+import { rollup } from 'rollup';
+import { nodeResolve } from '@rollup/plugin-node-resolve';
+import esbuild from 'rollup-plugin-esbuild';
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
-const runtimeSourcePaths = [
-  resolve(currentDir, '../extension/runtime/injected/visible-elements.injected.ts'),
-  resolve(currentDir, '../extension/runtime/injected/managed-click.injected.ts'),
-  resolve(currentDir, '../extension/runtime/injected/playwright-shim-types.injected.ts'),
-  resolve(currentDir, '../extension/runtime/injected/playwright-shim-helpers.injected.ts'),
-  resolve(currentDir, '../extension/runtime/injected/playwright-locator.injected.ts'),
-  resolve(currentDir, '../extension/runtime/injected/playwright-shim.injected.ts'),
-  resolve(currentDir, '../extension/runtime/injected/script-runtime.injected.ts'),
-];
+const projectRoot = resolve(currentDir, '..');
+const runtimeEntryPath = resolve(currentDir, '../extension/runtime/injected/main.injected.ts');
 const generatedPath = resolve(currentDir, '../extension/runtime/injected/script-runtime.generated.ts');
 
-function transpileRuntimeModule(source: string): string {
-  const transpiled = ts.transpileModule(source, {
-    compilerOptions: {
-      module: ts.ModuleKind.ESNext,
-      target: ts.ScriptTarget.ES2020,
-      removeComments: true,
-    },
-    reportDiagnostics: true,
+async function toInjectableFunctionSource(): Promise<{ runtimeSource: string; watchFiles: string[] }> {
+  const bundle = await rollup({
+    input: runtimeEntryPath,
+    plugins: [
+      nodeResolve({ browser: true, exportConditions: ['browser', 'default'] }),
+      esbuild({
+        target: 'es2020',
+        minifySyntax: true,
+        minifyWhitespace: true,
+        tsconfig: false,
+      }),
+    ],
+    treeshake: true,
   });
+  const watchFiles = bundle.watchFiles;
 
-  const diagnostics = transpiled.diagnostics ?? [];
-  if (diagnostics.length > 0) {
-    const message = diagnostics
-      .map((item) => ts.flattenDiagnosticMessageText(item.messageText, '\n'))
-      .join('\n');
-    throw new Error(message);
-  }
+  const { output } = await bundle.generate({
+    format: 'iife',
+    name: '__webCapScriptRuntimeBundle',
+    exports: 'named',
+    inlineDynamicImports: true,
+    compact: true,
+  });
+  await bundle.close();
 
-  return transpiled.outputText
-    .replace(/^\s*import\s+.+?;\s*$/gm, '')
-    .replace(/^export\s+(async\s+function\s+runScriptRuntime)/m, '$1')
-    .replace(/^export\s+(async\s+function\s+)/gm, '$1')
-    .replace(/^export\s+(function\s+)/gm, '$1')
-    .replace(/^\s*export\s+\{\};\s*$/gm, '')
-    .trim();
-}
-
-function toInjectableFunctionSource(sources: string[]): string {
-  const bundledSource = sources.map((source) => transpileRuntimeModule(source)).join('\n\n');
-
-  if (!bundledSource.includes('async function runScriptRuntime')) {
-    throw new Error('Generated runtime did not contain runScriptRuntime.');
-  }
-
-  const runtimeSource = `(() => {\n${bundledSource}\nreturn runScriptRuntime;\n})()`;
+  const bundledSource = output[0]?.code ?? '';
+  const runtimeSource = `(() => {\n${bundledSource}\nreturn __webCapScriptRuntimeBundle.runScriptRuntime;\n})()`;
   validateInjectableRuntimeSource(runtimeSource);
-  return runtimeSource;
+  return { runtimeSource, watchFiles };
 }
 
 function validateInjectableRuntimeSource(runtimeSource: string): void {
@@ -70,11 +57,8 @@ function validateInjectableRuntimeSource(runtimeSource: string): void {
   }
 }
 
-async function generateScriptRuntime(): Promise<void> {
-  const sources = await Promise.all(
-    runtimeSourcePaths.map((runtimeSourcePath) => readFile(runtimeSourcePath, 'utf8')),
-  );
-  const runtimeSource = toInjectableFunctionSource(sources);
+async function generateScriptRuntime(): Promise<string[]> {
+  const { runtimeSource, watchFiles } = await toInjectableFunctionSource();
   await writeFile(
     generatedPath,
     [
@@ -87,23 +71,44 @@ async function generateScriptRuntime(): Promise<void> {
   );
 
   console.log(`Generated ${generatedPath}`);
+  return watchFiles;
 }
 
-await generateScriptRuntime();
+const initialWatchFiles = await generateScriptRuntime();
 
 if (process.argv.includes('--watch')) {
   let pending: ReturnType<typeof setTimeout> | undefined;
+  const watchedFiles = new Set<string>();
   const scheduleGenerate = () => {
     clearTimeout(pending);
     pending = setTimeout(() => {
-      void generateScriptRuntime().catch((error) => {
-        console.error(error);
-        process.exitCode = 1;
-      });
+      void generateScriptRuntime()
+        .then((watchFiles) => updateWatchedFiles(watchFiles))
+        .catch((error) => {
+          console.error(error);
+          process.exitCode = 1;
+        });
     }, 50);
   };
+  const updateWatchedFiles = (watchFiles: string[]) => {
+    const nextWatchedFiles = new Set(
+      watchFiles.filter((filePath) => filePath.startsWith(projectRoot) && filePath !== generatedPath),
+    );
 
-  for (const runtimeSourcePath of runtimeSourcePaths) {
-    watchFile(runtimeSourcePath, { interval: 250 }, scheduleGenerate);
-  }
+    for (const filePath of watchedFiles) {
+      if (!nextWatchedFiles.has(filePath)) {
+        unwatchFile(filePath);
+        watchedFiles.delete(filePath);
+      }
+    }
+
+    for (const filePath of nextWatchedFiles) {
+      if (!watchedFiles.has(filePath)) {
+        watchFile(filePath, { interval: 250 }, scheduleGenerate);
+        watchedFiles.add(filePath);
+      }
+    }
+  };
+
+  updateWatchedFiles(initialWatchFiles);
 }

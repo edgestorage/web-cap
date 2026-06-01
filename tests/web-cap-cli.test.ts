@@ -1,9 +1,8 @@
-import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-  buildScriptRegisterRequest,
   buildScriptExecuteRequest,
   parseCliArgs,
   runCli,
@@ -25,12 +24,6 @@ describe('WEB_CAP CLI', () => {
     return {
       async start() {},
       async close() {},
-      async scriptSearch() {
-        return [];
-      },
-      async scriptGet() {
-        throw new Error('not used');
-      },
       async scriptExecute() {
         throw new Error('not used');
       },
@@ -39,9 +32,6 @@ describe('WEB_CAP CLI', () => {
       },
       async scriptRegistryList() {
         return [];
-      },
-      async scriptRegister() {
-        throw new Error('not used');
       },
       async browserNewTab() {
         throw new Error('not used');
@@ -111,11 +101,27 @@ describe('WEB_CAP CLI', () => {
       buildScriptExecuteRequest({
         scriptFile,
         inputFile,
+        tabId: 42,
       }),
     ).resolves.toEqual({
       script: 'export default async function () { return { ok: true }; }',
       input: { ok: true },
+      options: {
+        tabId: 42,
+      },
     });
+  });
+
+  it('requires a tab id for script execution', async () => {
+    expect(() =>
+      parseCliArgs(['script-execute', '--script', 'export default async function () {}']),
+    ).toThrow(/--tab-id/);
+
+    await expect(
+      buildScriptExecuteRequest({
+        script: 'export default async function () {}',
+      }),
+    ).rejects.toThrow(/--tab-id/);
   });
 
   it('parses wait-events arguments', () => {
@@ -129,25 +135,13 @@ describe('WEB_CAP CLI', () => {
   });
 
   it('parses MCP-equivalent utility commands', () => {
+    expect(parseCliArgs(['version'])).toEqual({ name: 'version' });
+    expect(parseCliArgs(['--version'])).toEqual({ name: 'version' });
+    expect(parseCliArgs(['-V'])).toEqual({ name: 'version' });
     expect(parseCliArgs(['mcp'])).toEqual({ name: 'mcp' });
-    expect(parseCliArgs(['session-status', '--compact'])).toEqual({
+    expect(parseCliArgs(['session-status', '--pretty'])).toEqual({
       name: 'session-status',
-      options: { compact: true },
-    });
-    expect(parseCliArgs(['script-search', 'inspect page', '--type', 'act', '--site', 'docs'])).toEqual({
-      name: 'script-search',
-      options: {
-        query: 'inspect page',
-        type: 'act',
-        site: 'docs',
-      },
-    });
-    expect(parseCliArgs(['script-get', 'builtin.page.inspect', '--version', '1.0.0'])).toEqual({
-      name: 'script-get',
-      options: {
-        scriptId: 'builtin.page.inspect',
-        version: '1.0.0',
-      },
+      options: { pretty: true },
     });
     expect(parseCliArgs(['browser-new-tab', '--url', 'https://example.com', '--active', 'false'])).toEqual({
       name: 'browser-new-tab',
@@ -162,6 +156,26 @@ describe('WEB_CAP CLI', () => {
         action: 'set',
         key: 'activateTabOnScriptExecute',
         value: true,
+      },
+    });
+    expect(parseCliArgs(['config', 'set', 'evidence', 'events,visibleElements'])).toEqual({
+      name: 'config',
+      options: {
+        action: 'set',
+        key: 'evidence',
+        value: ['events', 'visibleElements'],
+      },
+    });
+    expect(parseCliArgs(['config', 'set', 'evidence', 'all'])).toMatchObject({
+      options: {
+        key: 'evidence',
+        value: ['all'],
+      },
+    });
+    expect(parseCliArgs(['config', 'set', 'evidence', 'common'])).toMatchObject({
+      options: {
+        key: 'evidence',
+        value: ['common'],
       },
     });
   });
@@ -182,13 +196,14 @@ describe('WEB_CAP CLI', () => {
     expect(stdout).toContain('Commands:');
     expect(stdout).toContain('script-execute');
     expect(stdout).toContain('Script execution:');
-    expect(stdout).toContain('web-cap script-execute --script <code>');
+    expect(stdout).toContain('web-cap script-execute --tab-id <id> --script <code>');
     expect(stdout).toContain('Runs JavaScript in the selected browser tab.');
     expect(stdout).toContain('use cap.call(...) inside the script');
     expect(stdout).toContain('Playwright-style page API as global page and cap.page');
     expect(stdout).toContain("await page.getByRole('button', { name: 'Login' }).click();");
     expect(stdout).toContain("await page.locator('input[name=email]').fill(input.email);");
     expect(stdout).toContain('--script-file <path>');
+    expect(stdout).toContain('--tab-id <id>');
     expect(stdout).toContain('--timeout-ms <ms>');
     expect(stdout).not.toContain('--definition-file');
     expect(stdout).not.toContain('--active <true|false>');
@@ -237,32 +252,6 @@ describe('WEB_CAP CLI', () => {
     expect(stdout).not.toContain('browser-new-tab');
   });
 
-  it('loads script-register definition from JSON and files', async () => {
-    const definition = {
-      id: 'local.test',
-      name: 'Test script',
-      version: '1.0.0',
-      status: 'active',
-      type: 'act',
-    };
-
-    await expect(
-      buildScriptRegisterRequest({
-        definition: JSON.stringify(definition),
-      }),
-    ).resolves.toEqual(definition);
-
-    tempDir = await mkdtemp(join(tmpdir(), 'web-cap-cli-test-'));
-    const definitionFile = join(tempDir, 'definition.json');
-    await writeFile(definitionFile, JSON.stringify(definition));
-
-    await expect(
-      buildScriptRegisterRequest({
-        definitionFile,
-      }),
-    ).resolves.toEqual(definition);
-  });
-
   it('routes MCP-equivalent commands through the injected service', async () => {
     const calls: string[] = [];
     const service = createService({
@@ -273,45 +262,6 @@ describe('WEB_CAP CLI', () => {
           tabs: [],
           authenticatedSites: [],
         };
-      },
-      async scriptSearch(query, filters) {
-        calls.push(`scriptSearch:${query}:${filters?.type ?? ''}:${filters?.site ?? ''}`);
-        return [
-          {
-            scriptId: 'builtin.page.inspect',
-            name: 'Inspect current page',
-            summary: 'Inspect current page.',
-            type: 'act',
-            target: { site: 'generic-web' },
-            tags: ['builtin'],
-            score: 1,
-          },
-        ];
-      },
-      async scriptGet(scriptId, version) {
-        calls.push(`scriptGet:${scriptId}:${version ?? ''}`);
-        return {
-          scriptId,
-          name: 'Inspect current page',
-          version,
-          type: 'act',
-          summary: 'Inspect current page.',
-          description: 'Inspect current page.',
-          target: { site: 'generic-web' },
-          tags: ['builtin'],
-          inputSchema: { type: 'object' },
-          outputSchema: { type: 'object' },
-        } as unknown as Awaited<ReturnType<WebCapAgentService['scriptGet']>>;
-      },
-      async scriptRegister(scriptDefinition) {
-        calls.push(`scriptRegister:${(scriptDefinition as { id?: string }).id ?? ''}`);
-        return {
-          id: (scriptDefinition as { id: string }).id,
-          scriptDefinition,
-          status: 'active',
-          publishedAt: '2026-05-15T00:00:00.000Z',
-          updatedAt: '2026-05-15T00:00:00.000Z',
-        } as Awaited<ReturnType<WebCapAgentService['scriptRegister']>>;
       },
       async browserNewTab(input) {
         calls.push(`browserNewTab:${input.url ?? ''}:${String(input.active)}`);
@@ -332,11 +282,8 @@ describe('WEB_CAP CLI', () => {
     });
 
     const runs = [
-      ['session-status', '--compact'],
-      ['script-search', 'inspect', '--type', 'act', '--site', 'generic-web', '--compact'],
-      ['script-get', 'builtin.page.inspect', '--version', '1.0.0', '--compact'],
-      ['script-register', '--definition', '{"id":"local.test"}', '--compact'],
-      ['browser-new-tab', '--url', 'https://example.com', '--active', 'true', '--compact'],
+      ['session-status'],
+      ['browser-new-tab', '--url', 'https://example.com', '--active', 'true'],
     ];
 
     for (const argv of runs) {
@@ -358,11 +305,49 @@ describe('WEB_CAP CLI', () => {
 
     expect(calls).toEqual([
       'sessionStatus',
-      'scriptSearch:inspect:act:generic-web',
-      'scriptGet:builtin.page.inspect:1.0.0',
-      'scriptRegister:local.test',
       'browserNewTab:https://example.com:true',
     ]);
+  });
+
+  it('prints compact JSON by default and formatted JSON with --pretty', async () => {
+    const service = createService({
+      sessionStatus() {
+        return {
+          connected: false,
+          tabs: [],
+          authenticatedSites: [],
+        };
+      },
+    });
+
+    let stdout = '';
+    let stderr = '';
+    const compactCode = await runCli(
+      ['session-status'],
+      {
+        stdout: { write: (chunk: string) => { stdout += chunk; return true; } },
+        stderr: { write: (chunk: string) => { stderr += chunk; return true; } },
+      },
+      async () => service,
+    );
+
+    expect(compactCode).toBe(0);
+    expect(stderr).toBe('');
+    expect(stdout.trim()).toBe(JSON.stringify(JSON.parse(stdout)));
+
+    stdout = '';
+    const prettyCode = await runCli(
+      ['session-status', '--pretty'],
+      {
+        stdout: { write: (chunk: string) => { stdout += chunk; return true; } },
+        stderr: { write: (chunk: string) => { stderr += chunk; return true; } },
+      },
+      async () => service,
+    );
+
+    expect(prettyCode).toBe(0);
+    expect(stderr).toBe('');
+    expect(stdout).toContain('\n  "connected": false');
   });
 
   it('runs the stdio MCP adapter as a CLI command', async () => {
@@ -391,23 +376,38 @@ describe('WEB_CAP CLI', () => {
     expect(runMcp).toHaveBeenCalledTimes(1);
   });
 
+  it('prints the package version without connecting to the daemon', async () => {
+    const packageJson = JSON.parse(await readFile(join(process.cwd(), 'package.json'), 'utf8')) as {
+      version: string;
+    };
+    const connect = vi.fn();
+    let stdout = '';
+    let stderr = '';
+
+    const code = await runCli(
+      ['version'],
+      {
+        stdout: { write: (chunk: string) => { stdout += chunk; return true; } },
+        stderr: { write: (chunk: string) => { stderr += chunk; return true; } },
+      },
+      connect,
+    );
+
+    expect(code).toBe(0);
+    expect(stdout).toBe(`${packageJson.version}\n`);
+    expect(stderr).toBe('');
+    expect(connect).not.toHaveBeenCalled();
+  });
+
   it('executes through the injected service and prints JSON', async () => {
     const calls: ExecuteScriptRequest[] = [];
     const service = {
       async start() {},
       async close() {},
-      async scriptSearch() {
-        return [];
-      },
-      async scriptGet() {
-        throw new Error('not used');
-      },
       async scriptExecute(request: ExecuteScriptRequest) {
         calls.push(request);
         return {
           scriptId: 'temp.script.000001',
-          localScriptId: 'temp.script.000001',
-          scriptType: 'act',
           status: 'succeeded',
           result: { ok: true },
           evidence: { events: [], screenshots: [] },
@@ -427,9 +427,6 @@ describe('WEB_CAP CLI', () => {
       },
       async scriptRegistryList() {
         return [];
-      },
-      async scriptRegister() {
-        throw new Error('not used');
       },
       async browserNewTab() {
         throw new Error('not used');
@@ -455,7 +452,8 @@ describe('WEB_CAP CLI', () => {
         'export default async function () { return { ok: true }; }',
         '--input',
         '{"x":1}',
-        '--compact',
+        '--tab-id',
+        '1',
       ],
       {
         stdout: { write: (chunk: string) => { stdout += chunk; return true; } },
@@ -470,12 +468,17 @@ describe('WEB_CAP CLI', () => {
       {
         script: 'export default async function () { return { ok: true }; }',
         input: { x: 1 },
+        options: {
+          tabId: 1,
+          evidence: ['common'],
+        },
       },
     ]);
     expect(JSON.parse(stdout)).toMatchObject({
       status: 'succeeded',
       result: { ok: true },
     });
+    expect(stdout.trim()).toBe(JSON.stringify(JSON.parse(stdout)));
   });
 
   it('persists config and applies activateTab to script execution', async () => {
@@ -487,8 +490,6 @@ describe('WEB_CAP CLI', () => {
         calls.push(request);
         return {
           scriptId: 'temp.script.000001',
-          localScriptId: 'temp.script.000001',
-          scriptType: 'act',
           status: 'succeeded',
           result: { ok: true },
           evidence: { events: [], screenshots: [] },
@@ -508,7 +509,7 @@ describe('WEB_CAP CLI', () => {
     let stderr = '';
 
     const setCode = await runCli(
-      ['config', 'set', 'activateTabOnScriptExecute', 'true', '--compact'],
+      ['config', 'set', 'activateTabOnScriptExecute', 'true'],
       {
         stdout: { write: (chunk: string) => { stdout += chunk; return true; } },
         stderr: { write: (chunk: string) => { stderr += chunk; return true; } },
@@ -527,12 +528,36 @@ describe('WEB_CAP CLI', () => {
     });
 
     stdout = '';
+    const setEvidenceCode = await runCli(
+      ['config', 'set', 'evidence', 'events,visibleElements'],
+      {
+        stdout: { write: (chunk: string) => { stdout += chunk; return true; } },
+        stderr: { write: (chunk: string) => { stderr += chunk; return true; } },
+      },
+      async () => {
+        throw new Error('config should not connect to daemon');
+      },
+    );
+
+    expect(setEvidenceCode).toBe(0);
+    expect(stderr).toBe('');
+    expect(JSON.parse(stdout)).toMatchObject({
+      key: 'evidence',
+      value: ['events', 'visibleElements'],
+      config: {
+        activateTabOnScriptExecute: true,
+        evidence: ['events', 'visibleElements'],
+      },
+    });
+
+    stdout = '';
     const executeCode = await runCli(
       [
         'script-execute',
         '--script',
         'export default async function () { return { ok: true }; }',
-        '--compact',
+        '--tab-id',
+        '9',
       ],
       {
         stdout: { write: (chunk: string) => { stdout += chunk; return true; } },
@@ -548,7 +573,9 @@ describe('WEB_CAP CLI', () => {
         script: 'export default async function () { return { ok: true }; }',
         input: {},
         options: {
+          tabId: 9,
           activateTab: true,
+          evidence: ['events', 'visibleElements'],
         },
       },
     ]);
@@ -558,12 +585,6 @@ describe('WEB_CAP CLI', () => {
     const service = {
       async start() {},
       async close() {},
-      async scriptSearch() {
-        return [];
-      },
-      async scriptGet() {
-        throw new Error('not used');
-      },
       async scriptExecute() {
         throw new Error('not used');
       },
@@ -572,9 +593,6 @@ describe('WEB_CAP CLI', () => {
       },
       async scriptRegistryList() {
         return [];
-      },
-      async scriptRegister() {
-        throw new Error('not used');
       },
       async browserNewTab() {
         throw new Error('not used');
@@ -648,7 +666,7 @@ describe('WEB_CAP CLI', () => {
     const connect = vi.fn();
     let stderr = '';
     const code = await runCli(
-      ['script-execute', '--script', 'export default async function () {}', '--input', '[]'],
+      ['script-execute', '--script', 'export default async function () {}', '--tab-id', '1', '--input', '[]'],
       {
         stdout: { write: () => true },
         stderr: { write: (chunk: string) => { stderr += chunk; return true; } },

@@ -1,4 +1,5 @@
 import type { ScriptDefinition } from '@shared/script-schema';
+import type { ExecutionEvidenceOption } from '@shared/protocol';
 import { ChromeDebuggerClient } from './chrome-debugger-client';
 import type { DebuggerEvaluateResult } from './debugger-types';
 import {
@@ -30,6 +31,7 @@ export class DebuggerScriptExecutor {
     scriptDefinition: ScriptDefinition,
     input: Record<string, unknown>,
     scriptRegistry: ScriptDefinition[],
+    evidence: ExecutionEvidenceOption[] = [],
   ): Promise<ScriptExecutionResponse> {
     if (!this.isAvailable()) {
       throw new Error('chrome.debugger is not available in this browser runtime.');
@@ -62,6 +64,7 @@ export class DebuggerScriptExecutor {
             managedWindowBridgeFunctionName: windowBridge.bridgeFunctionName,
             managedTimerBridgeFunctionName: timerBridge.bridgeFunctionName,
             managedBrowserBridgeFunctionName: browserBridge.bridgeFunctionName,
+            evidence,
           }),
           awaitPromise: true,
           returnByValue: true,

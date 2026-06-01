@@ -1,19 +1,26 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { z } from 'zod';
+import type { ExecutionEvidenceOption } from '@shared/protocol';
 import { resolveWebCapStateDir } from './server/state-dir';
 
 export const WEB_CAP_CONFIG_FILE_NAME = 'config.json';
-export const WEB_CAP_CONFIG_KEYS = ['activateTabOnScriptExecute'] as const;
+export const WEB_CAP_CONFIG_KEYS = [
+  'activateTabOnScriptExecute',
+  'evidence',
+] as const;
+export const WEB_CAP_EVIDENCE_OPTIONS = ['events', 'visibleElements', 'common', 'all'] as const;
 
 const webCapConfigSchema = z
   .object({
     activateTabOnScriptExecute: z.boolean().optional(),
+    evidence: z.array(z.enum(WEB_CAP_EVIDENCE_OPTIONS)).optional(),
   })
   .default({});
 
 export type WebCapConfig = z.infer<typeof webCapConfigSchema>;
 export type WebCapConfigKey = (typeof WEB_CAP_CONFIG_KEYS)[number];
+export type WebCapEvidenceConfig = ExecutionEvidenceOption[];
 
 export interface WebCapConfigEnvironment {
   WEB_CAP_STATE_DIR?: string;

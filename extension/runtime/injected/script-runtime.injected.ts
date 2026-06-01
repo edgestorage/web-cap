@@ -12,6 +12,8 @@ interface RuntimeEvidenceEvent {
   value: unknown;
 }
 
+type RuntimeEvidenceOption = 'events' | 'visibleElements' | 'common' | 'all';
+
 interface RuntimeFieldSchema {
   type?: string;
   minimum?: number;
@@ -91,6 +93,7 @@ export interface ScriptRuntimeArgs {
   managedKeyboardBridgeFunctionName: string | null;
   managedWindowBridgeFunctionName: string | null;
   managedBrowserBridgeFunctionName: string | null;
+  evidence: RuntimeEvidenceOption[];
   scriptFactories: Record<string, (input: RuntimeJsonObject) => unknown>;
 }
 
@@ -102,6 +105,7 @@ export async function runScriptRuntime({
   managedKeyboardBridgeFunctionName,
   managedWindowBridgeFunctionName,
   managedBrowserBridgeFunctionName,
+  evidence,
   scriptFactories,
 }: ScriptRuntimeArgs) {
   function validateScalarField(
@@ -186,9 +190,9 @@ export async function runScriptRuntime({
     throw new Error('Script script must return a JSON object.');
   }
 
-  function createEvidence(): RuntimeEvidence {
+  function createEvidence(includeUrl = false): RuntimeEvidence {
     return {
-      url: globalThis.location?.href,
+      url: includeUrl ? globalThis.location?.href : undefined,
       events: [],
       screenshots: [],
       visibleElements: undefined,
@@ -204,11 +208,42 @@ export async function runScriptRuntime({
 
   const POST_ACTION_VISIBLE_DIFF_DELAY_MS = 200;
   const MAX_SCROLL_TARGETS = 200;
+  const collectEvents = shouldCollectEvidence('events');
+  const collectVisibleElements = shouldCollectEvidence('visibleElements');
 
   function hasPostActionEventSince(eventStartIndex: number) {
     return context.evidence.events
       .slice(eventStartIndex)
       .some((event) => event.type === 'managed_click' || event.type === 'managed_mouse');
+  }
+
+  function shouldCollectEvidence(
+    option: Exclude<RuntimeEvidenceOption, 'common' | 'all'>,
+  ): boolean {
+    return evidence.includes('all') || evidence.includes('common') || evidence.includes(option);
+  }
+
+  function buildResponseEvidence(): RuntimeEvidence {
+    const responseEvidence = createEvidence(collectEvents || collectVisibleElements);
+    if (collectEvents) {
+      responseEvidence.events = context.evidence.events.filter(shouldIncludeEvidenceEvent);
+    }
+    if (collectVisibleElements) {
+      responseEvidence.visibleElements = context.evidence.visibleElements;
+      responseEvidence.visibleElementsTimingMs = context.evidence.visibleElementsTimingMs;
+      responseEvidence.visibleElementsDebugTiming = context.evidence.visibleElementsDebugTiming;
+    }
+    return responseEvidence;
+  }
+
+  function shouldIncludeEvidenceEvent(event: RuntimeEvidenceEvent): boolean {
+    if (evidence.includes('all') || evidence.includes('events')) {
+      return true;
+    }
+    if (evidence.includes('common')) {
+      return event.type !== 'managed_mouse';
+    }
+    return false;
   }
 
   function toSchemaSummary(item: RuntimeScript): RuntimeJsonObject {
@@ -223,7 +258,7 @@ export async function runScriptRuntime({
 
   const context: RuntimeContext = {
     registry: new Map(),
-    evidence: createEvidence(),
+    evidence: createEvidence(collectEvents || collectVisibleElements),
     state: {},
     callStack: [],
     pendingAsyncOperations: Promise.resolve(),
@@ -290,7 +325,9 @@ export async function runScriptRuntime({
   function installPageSideEffectTracking() {
     const initialScrollPositions = collectScrollPositions();
     const initialUrl = globalThis.location?.href;
+    const initialTitle = globalThis.document?.title ?? '';
     let lastUrl = initialUrl;
+    let lastTitle = initialTitle;
 
     const runtimeGlobal = globalThis as typeof globalThis & {
       history?: History;
@@ -306,20 +343,33 @@ export async function runScriptRuntime({
 
     const recordUrlChange = (method: string) => {
       const nextUrl = globalThis.location?.href;
-      if (!nextUrl || !lastUrl || nextUrl === lastUrl) {
+      const nextTitle = globalThis.document?.title ?? '';
+      if (!nextUrl || !lastUrl || (nextUrl === lastUrl && nextTitle === lastTitle)) {
         return;
       }
 
+      const from: { title?: string; url?: string } = {};
+      const to: { title?: string; url?: string } = {};
+      if (nextUrl !== lastUrl) {
+        from.url = lastUrl;
+        to.url = nextUrl;
+      }
+      if (nextTitle !== lastTitle) {
+        from.title = lastTitle;
+        to.title = nextTitle;
+      }
+
       context.evidence.events.push({
-        type: 'page_url_changed',
+        type: 'page_changed',
         value: {
-          from: lastUrl,
-          to: nextUrl,
+          from,
+          to,
           mode: 'history',
           method,
         },
       });
       lastUrl = nextUrl;
+      lastTitle = nextTitle;
     };
 
     if (historyObject && originalPushState) {
@@ -492,6 +542,35 @@ export async function runScriptRuntime({
     };
   }
 
+  function describeKeyboardEvidenceTarget(element: unknown): RuntimeJsonObject | null {
+    if (!(element instanceof Element)) {
+      return null;
+    }
+
+    const target: RuntimeJsonObject = {
+      tag: element.tagName.toLowerCase(),
+    };
+
+    if (element.id) {
+      target.id = element.id;
+    }
+
+    if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
+      if (element.name) {
+        target.name = element.name;
+      }
+      if (element.placeholder) {
+        target.placeholder = element.placeholder;
+      }
+    }
+
+    if (element instanceof HTMLInputElement && element.type) {
+      target.type = element.type;
+    }
+
+    return target;
+  }
+
   function enqueueManagedOperation(operation: () => Promise<void>) {
     const next = context.pendingAsyncOperations
       .catch(() => undefined)
@@ -533,7 +612,13 @@ export async function runScriptRuntime({
       throw new Error('Typing target is not editable.');
     }
 
-    context.evidence.events.push({ type: 'managed_type', value: { length: text.length } });
+    context.evidence.events.push({
+      type: 'managed_type',
+      value: {
+        target: describeKeyboardEvidenceTarget(element),
+        length: text.length,
+      },
+    });
     await enqueueManagedOperation(async () => {
       await Promise.resolve(
         bridgeFunction({
@@ -735,11 +820,17 @@ export async function runScriptRuntime({
     const previousPage = runtimeGlobal.page;
     runtimeGlobal.cap = cap;
     runtimeGlobal.page = page;
-    const visibleElementsStartedAt = Date.now();
-    const beforeSnapshotStartedAt = Date.now();
-    const beforeVisibleElements = context.visibleElementsTracker.snapshot();
-    const beforeSnapshotTimingMs = Date.now() - beforeSnapshotStartedAt;
-    context.visibleElementsTracker.start();
+    const visibleElementsStartedAt = collectVisibleElements ? Date.now() : 0;
+    const beforeSnapshotStartedAt = collectVisibleElements ? Date.now() : 0;
+    const beforeVisibleElements = collectVisibleElements
+      ? context.visibleElementsTracker.snapshot()
+      : undefined;
+    const beforeSnapshotTimingMs = collectVisibleElements
+      ? Date.now() - beforeSnapshotStartedAt
+      : 0;
+    if (collectVisibleElements) {
+      context.visibleElementsTracker.start();
+    }
 
     let result;
     let scriptTimingMs = 0;
@@ -763,32 +854,38 @@ export async function runScriptRuntime({
     }
 
     let postActionDelayMs = 0;
-    if (typeof document !== 'undefined' && hasPostActionEventSince(scriptEventStartIndex)) {
+    if (
+      collectVisibleElements &&
+      typeof document !== 'undefined' &&
+      hasPostActionEventSince(scriptEventStartIndex)
+    ) {
       const postActionDelayStartedAt = Date.now();
       await wait(POST_ACTION_VISIBLE_DIFF_DELAY_MS);
       postActionDelayMs = Date.now() - postActionDelayStartedAt;
     }
-    const visibleElementChanges = context.visibleElementsTracker.stop();
-    const afterSnapshotStartedAt = Date.now();
-    const afterVisibleElements =
-      context.visibleElementsTracker.snapshotForChanges(visibleElementChanges);
-    const afterSnapshotTimingMs = Date.now() - afterSnapshotStartedAt;
-    const diffStartedAt = Date.now();
-    const visibleElementsDiff = context.visibleElementsTracker.diff(
-      beforeVisibleElements,
-      afterVisibleElements,
-      visibleElementChanges,
-    );
-    const diffTimingMs = Date.now() - diffStartedAt;
-    context.evidence.visibleElements = visibleElementsDiff;
-    context.evidence.visibleElementsTimingMs = Date.now() - visibleElementsStartedAt;
-    context.evidence.visibleElementsDebugTiming = {
-      scriptTimingMs,
-      beforeSnapshotTimingMs,
-      postActionDelayMs,
-      afterSnapshotTimingMs,
-      diffTimingMs,
-    };
+    if (collectVisibleElements) {
+      const visibleElementChanges = context.visibleElementsTracker.stop();
+      const afterSnapshotStartedAt = Date.now();
+      const afterVisibleElements =
+        context.visibleElementsTracker.snapshotForChanges(visibleElementChanges);
+      const afterSnapshotTimingMs = Date.now() - afterSnapshotStartedAt;
+      const diffStartedAt = Date.now();
+      const visibleElementsDiff = context.visibleElementsTracker.diff(
+        beforeVisibleElements,
+        afterVisibleElements,
+        visibleElementChanges,
+      );
+      const diffTimingMs = Date.now() - diffStartedAt;
+      context.evidence.visibleElements = visibleElementsDiff;
+      context.evidence.visibleElementsTimingMs = Date.now() - visibleElementsStartedAt;
+      context.evidence.visibleElementsDebugTiming = {
+        scriptTimingMs,
+        beforeSnapshotTimingMs,
+        postActionDelayMs,
+        afterSnapshotTimingMs,
+        diffTimingMs,
+      };
+    }
 
     const output = normalizeResult(result);
     const outputValidation = validateInputAgainstSchema(output, item.outputSchema);
@@ -827,14 +924,16 @@ export async function runScriptRuntime({
           setTimeout(
             () => {
               const message = `Script ${item.id} timed out after ${item.script.timeoutMs}ms.`;
-              context.evidence.events.push({
-                type: 'execution_interrupted_by_timeout',
-                value: {
-                  scriptId: item.id,
-                  timeoutMs: item.script.timeoutMs,
-                  message,
-                },
-              });
+              if (collectEvents) {
+                context.evidence.events.push({
+                  type: 'execution_interrupted_by_timeout',
+                  value: {
+                    scriptId: item.id,
+                    timeoutMs: item.script.timeoutMs,
+                    message,
+                  },
+                });
+              }
               resolve({
                 interrupted: true,
                 reason: 'timeout',
@@ -879,13 +978,13 @@ export async function runScriptRuntime({
         ok: true,
         status: interrupted ? 'interrupted' : 'succeeded',
         result,
-        evidence: context.evidence,
+        evidence: buildResponseEvidence(),
       };
     } catch (error) {
       return {
         ok: false,
         error: error instanceof Error ? error.message : String(error),
-        evidence: context.evidence,
+        evidence: buildResponseEvidence(),
       };
     } finally {
       restoreWindowCloseHook();
