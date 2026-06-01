@@ -38,6 +38,7 @@ export class UserScriptExecutor {
     input: Record<string, unknown>,
     scriptRegistry: ScriptDefinition[],
     evidence: ExecutionEvidenceOption[] = [],
+    screenshotArtifactBasePath?: string,
   ): Promise<ScriptExecutionResponse> {
     const chromeApi = this.getChromeApi();
     if (!chromeApi?.userScripts?.execute) {
@@ -51,6 +52,7 @@ export class UserScriptExecutor {
       js: [
         {
           code: buildScriptExecutionExpression(scriptDefinition, input, scriptRegistry, {
+            screenshotArtifactBasePath,
             evidence,
           }),
         },

@@ -484,6 +484,164 @@ export default async function () {
     }
   });
 
+  it('exposes Playwright keyboard actions on the page shim', async () => {
+    class FakeHTMLElement {
+      textContent = '';
+      isContentEditable = true;
+      events: string[] = [];
+
+      scrollIntoView() {}
+
+      focus() {
+        fakeDocument.activeElement = this;
+      }
+
+      dispatchEvent(event: { type: string }) {
+        this.events.push(event.type);
+        return true;
+      }
+    }
+
+    class FakeInputElement extends FakeHTMLElement {
+      value = '';
+      isContentEditable = false;
+    }
+
+    class FakeKeyboardEvent {
+      type: string;
+
+      constructor(type: string) {
+        this.type = type;
+      }
+    }
+
+    class FakeInputEvent {
+      type: string;
+
+      constructor(type: string) {
+        this.type = type;
+      }
+    }
+
+    const target = new FakeHTMLElement();
+    const fakeDocument = {
+      activeElement: target,
+      body: target,
+      documentElement: target,
+      querySelectorAll() {
+        return [];
+      },
+    };
+    const previousHTMLElement = Object.getOwnPropertyDescriptor(globalThis, 'HTMLElement');
+    const previousHTMLInputElement = Object.getOwnPropertyDescriptor(globalThis, 'HTMLInputElement');
+    const previousHTMLTextAreaElement = Object.getOwnPropertyDescriptor(globalThis, 'HTMLTextAreaElement');
+    const previousKeyboardEvent = Object.getOwnPropertyDescriptor(globalThis, 'KeyboardEvent');
+    const previousInputEvent = Object.getOwnPropertyDescriptor(globalThis, 'InputEvent');
+
+    Object.defineProperty(globalThis, 'document', {
+      value: fakeDocument,
+      configurable: true,
+    });
+    Object.defineProperty(globalThis, 'HTMLElement', {
+      value: FakeHTMLElement,
+      configurable: true,
+    });
+    Object.defineProperty(globalThis, 'HTMLInputElement', {
+      value: FakeInputElement,
+      configurable: true,
+    });
+    Object.defineProperty(globalThis, 'HTMLTextAreaElement', {
+      value: FakeInputElement,
+      configurable: true,
+    });
+    Object.defineProperty(globalThis, 'KeyboardEvent', {
+      value: FakeKeyboardEvent,
+      configurable: true,
+    });
+    Object.defineProperty(globalThis, 'InputEvent', {
+      value: FakeInputEvent,
+      configurable: true,
+    });
+
+    try {
+      const script = scriptDefinitionSchema.parse({
+        id: 'keyboard.type',
+        name: 'Keyboard Type',
+        version: '1.0.0',
+        status: 'active',
+        type: 'act',
+        summary: 'Types through the Playwright keyboard shim.',
+        target: {
+          site: 'generic-web',
+          urlPatterns: ['http://*', 'https://*'],
+          pageHints: [],
+        },
+        tags: ['test'],
+        inputSchema: {
+          type: 'object',
+          properties: {},
+          required: [],
+          additionalProperties: false,
+        },
+        outputSchema: {
+          type: 'object',
+          properties: {
+            ok: { type: 'boolean' },
+            text: { type: 'string' },
+            eventCount: { type: 'number' },
+          },
+          required: ['ok', 'text', 'eventCount'],
+          additionalProperties: false,
+        },
+        script: {
+          timeoutMs: 1_000,
+          code: `
+export default async function () {
+  await page.keyboard.type('hi');
+  await page.keyboard.press('Enter');
+  return { ok: true, text: document.activeElement.textContent, eventCount: document.activeElement.events.length };
+}
+          `.trim(),
+        },
+      });
+
+      const expression = buildScriptExecutionExpression(script, {}, [], { evidence: ['events'] });
+      const response = (await eval(expression)) as {
+        ok: boolean;
+        result?: Record<string, unknown>;
+      };
+
+      expect(response.ok).toBe(true);
+      expect(response.result).toEqual({ ok: true, text: 'hi', eventCount: 11 });
+    } finally {
+      if (previousHTMLElement) {
+        Object.defineProperty(globalThis, 'HTMLElement', previousHTMLElement);
+      } else {
+        delete (globalThis as { HTMLElement?: unknown }).HTMLElement;
+      }
+      if (previousHTMLInputElement) {
+        Object.defineProperty(globalThis, 'HTMLInputElement', previousHTMLInputElement);
+      } else {
+        delete (globalThis as { HTMLInputElement?: unknown }).HTMLInputElement;
+      }
+      if (previousHTMLTextAreaElement) {
+        Object.defineProperty(globalThis, 'HTMLTextAreaElement', previousHTMLTextAreaElement);
+      } else {
+        delete (globalThis as { HTMLTextAreaElement?: unknown }).HTMLTextAreaElement;
+      }
+      if (previousKeyboardEvent) {
+        Object.defineProperty(globalThis, 'KeyboardEvent', previousKeyboardEvent);
+      } else {
+        delete (globalThis as { KeyboardEvent?: unknown }).KeyboardEvent;
+      }
+      if (previousInputEvent) {
+        Object.defineProperty(globalThis, 'InputEvent', previousInputEvent);
+      } else {
+        delete (globalThis as { InputEvent?: unknown }).InputEvent;
+      }
+    }
+  });
+
   it('routes user script setTimeout through the managed timer bridge when provided', async () => {
     const originalSetTimeout = globalThis.setTimeout;
     const originalClearTimeout = globalThis.clearTimeout;

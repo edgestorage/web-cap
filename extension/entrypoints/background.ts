@@ -8,6 +8,7 @@ import {
   type ExecutionEvidenceEvent,
   type ExecutionEvidenceOption,
   type RuntimeEnvelope,
+  type RuntimeScreenshotArtifactPayload,
   type ScriptExecutionHistoryEntry,
   type RuntimeTabSnapshot,
 } from '@shared/protocol';
@@ -20,6 +21,7 @@ import {
 import {
   isDebuggerFallbackEligibleError,
   isExecutionInterruptedByNavigationError,
+  type ScriptScreenshotArtifact,
   type ScriptExecutionResponse,
 } from '../runtime/execution-helpers';
 import { BrowserCommandHandler } from '../runtime/browser-command-handler';
@@ -95,7 +97,7 @@ class RuntimeClient {
     },
     sendTabSnapshot: () => this.sendTabSnapshot(),
     toTabSnapshot: (tab) => this.toTabSnapshot(tab),
-  });
+  }, this.debuggerExecutor.getDebuggerClient());
 
   start(): void {
     this.connect();
@@ -174,6 +176,7 @@ class RuntimeClient {
           envelope.payload.tabId,
           envelope.payload.activateTab,
           envelope.payload.evidence ?? [],
+          envelope.payload.screenshotArtifactBasePath,
         );
         break;
       case 'browser_command':
@@ -203,8 +206,20 @@ class RuntimeClient {
     tabId?: number,
     activateTab?: boolean,
     evidenceOptions: ExecutionEvidenceOption[] = ['common'],
+    screenshotArtifactBasePath?: string,
   ): Promise<void> {
-    const selectedTab = tabId ? await browser.tabs.get(tabId) : await this.getActiveTab();
+    let selectedTab: BrowserTabLike | undefined;
+    try {
+      selectedTab = tabId ? await browser.tabs.get(tabId) : await this.getActiveTab();
+    } catch (error) {
+      this.sendError(
+        requestId,
+        'EXECUTION_FAILED',
+        error instanceof Error ? error.message : String(error),
+        { scriptId: scriptDefinition.id, tabId },
+      );
+      return;
+    }
     if (!selectedTab?.id || !selectedTab.url) {
       this.sendError(requestId, 'TAB_NOT_FOUND', 'No active browser tab is available.', {
         scriptId: scriptDefinition.id,
@@ -249,6 +264,7 @@ class RuntimeClient {
           input,
           scriptRegistry,
           evidenceOptions,
+          screenshotArtifactBasePath,
         );
       } catch (error) {
         if (!isExecutionInterruptedByNavigationError(error)) {
@@ -317,6 +333,10 @@ class RuntimeClient {
             result,
             evidence,
             status: response.status ?? 'succeeded',
+            screenshotArtifacts: this.sendBinaryScreenshotArtifacts(
+              response.screenshotArtifacts ?? [],
+              requestId,
+            ),
           },
           { sessionId: this.sessionId, requestId },
         ),
@@ -359,6 +379,7 @@ class RuntimeClient {
     input: Record<string, unknown>,
     scriptRegistry: ScriptDefinition[],
     evidence: ExecutionEvidenceOption[],
+    screenshotArtifactBasePath?: string,
   ): Promise<ScriptExecutionResponse> {
     const requiresBrowserLevelClick = scriptRequiresBrowserLevelClick(
       scriptDefinition,
@@ -386,6 +407,7 @@ class RuntimeClient {
         input,
         scriptRegistry,
         evidence,
+        screenshotArtifactBasePath,
       );
     }
 
@@ -400,6 +422,7 @@ class RuntimeClient {
         input,
         scriptRegistry,
         evidence,
+        screenshotArtifactBasePath,
       );
     } catch (error) {
       if (
@@ -415,6 +438,7 @@ class RuntimeClient {
         input,
         scriptRegistry,
         evidence,
+        screenshotArtifactBasePath,
       );
     }
   }
@@ -425,7 +449,18 @@ class RuntimeClient {
     input: Record<string, unknown>,
     tabId?: number,
   ): Promise<void> {
-    const activeTab = tabId ? await browser.tabs.get(tabId) : await this.getActiveTab();
+    let activeTab: BrowserTabLike | undefined;
+    try {
+      activeTab = tabId ? await browser.tabs.get(tabId) : await this.getActiveTab();
+    } catch (error) {
+      this.sendError(
+        requestId,
+        'EXECUTION_FAILED',
+        error instanceof Error ? error.message : String(error),
+        { command, tabId },
+      );
+      return;
+    }
     if (!activeTab?.id || !activeTab.url) {
       this.sendError(requestId, 'TAB_NOT_FOUND', 'No active browser tab is available.', {
         command,
@@ -458,7 +493,11 @@ class RuntimeClient {
         createRuntimeEnvelope(
           'browser_command_result',
           {
-            result: response.result,
+            result: this.extractBinaryScreenshotArtifacts(
+              response.result,
+              requestId,
+              'metadata',
+            ) as Record<string, unknown>,
           },
           { sessionId: this.sessionId, requestId },
         ),
@@ -886,11 +925,137 @@ class RuntimeClient {
     );
   }
 
+  private extractBinaryScreenshotArtifacts(
+    value: unknown,
+    requestId: string,
+    resultShape: 'path' | 'metadata',
+  ): unknown {
+    if (isScreenshotArtifact(value)) {
+      const transferId = crypto.randomUUID();
+      const bytes = decodeBase64(value.data);
+      const type = value.type === 'jpeg' ? 'jpeg' : 'png';
+      const mimeType = typeof value.mimeType === 'string'
+        ? value.mimeType
+        : type === 'jpeg'
+          ? 'image/jpeg'
+          : 'image/png';
+
+      this.send(
+        createRuntimeEnvelope(
+          'binary_payload_start',
+          {
+            transferId,
+            kind: 'screenshot',
+            mimeType,
+            type,
+            byteLength: bytes.byteLength,
+            resultShape,
+          },
+          { sessionId: this.sessionId, requestId },
+        ),
+      );
+      this.sendBinary(bytes);
+
+      return {
+        __webCapType: 'screenshot_transfer',
+        transferId,
+        resultShape,
+      };
+    }
+
+    if (Array.isArray(value)) {
+      return value.map((item) => this.extractBinaryScreenshotArtifacts(item, requestId, resultShape));
+    }
+
+    if (isRecord(value)) {
+      return Object.fromEntries(
+        Object.entries(value).map(([key, item]) => [
+          key,
+          this.extractBinaryScreenshotArtifacts(item, requestId, resultShape),
+        ]),
+      );
+    }
+
+    return value;
+  }
+
+  private sendBinaryScreenshotArtifacts(
+    artifacts: ScriptScreenshotArtifact[],
+    requestId: string,
+  ): RuntimeScreenshotArtifactPayload[] {
+    return artifacts.map((artifact) => {
+      const transferId = crypto.randomUUID();
+      const bytes = decodeBase64(artifact.data);
+      const type = artifact.type === 'jpeg' ? 'jpeg' : 'png';
+      const mimeType = typeof artifact.mimeType === 'string'
+        ? artifact.mimeType
+        : type === 'jpeg'
+          ? 'image/jpeg'
+          : 'image/png';
+
+      this.send(
+        createRuntimeEnvelope(
+          'binary_payload_start',
+          {
+            transferId,
+            kind: 'screenshot',
+            mimeType,
+            type,
+            byteLength: bytes.byteLength,
+            resultShape: 'metadata',
+            path: artifact.path,
+          },
+          { sessionId: this.sessionId, requestId },
+        ),
+      );
+      this.sendBinary(bytes);
+
+      return {
+        kind: 'screenshot',
+        path: artifact.path,
+        transferId,
+        mimeType,
+        type,
+      };
+    });
+  }
+
   private send(envelope: RuntimeEnvelope): void {
     if (this.socket?.readyState === WebSocket.OPEN) {
       this.socket.send(JSON.stringify(envelope));
     }
   }
+
+  private sendBinary(bytes: Uint8Array): void {
+    if (this.socket?.readyState === WebSocket.OPEN) {
+      this.socket.send(bytes);
+    }
+  }
+}
+
+function isScreenshotArtifact(value: unknown): value is {
+  data: string;
+  mimeType?: string;
+  type?: string;
+} {
+  return (
+    isRecord(value) &&
+    value.__webCapType === 'screenshot' &&
+    typeof value.data === 'string'
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function decodeBase64(value: string): Uint8Array {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes;
 }
 
 function applyExecutionTabIndicatorScript(titlePrefix: string): void {

@@ -1,5 +1,6 @@
 import {
   type BrowserCommandResult,
+  type BrowserScreenshotResult,
   type RuntimeConnectionSnapshot,
   type RuntimeSessionSnapshot,
   type RuntimeTabSnapshot,
@@ -9,9 +10,11 @@ import { RuntimeBridgeError } from '../runtime/runtime-bridge';
 import {
   parseBrowserCommandRequest,
   timeoutForBrowserCommand,
+  type BrowserScreenshotInput,
   type CreateTabInput,
   type WaitEventsInput,
 } from './command-contracts';
+import { storeBrowserScreenshot } from './screenshot-store';
 
 export interface ExecutionTarget {
   runtime?: RuntimeConnectionSnapshot;
@@ -23,6 +26,30 @@ export class BrowserSessionService {
 
   status(): RuntimeSessionSnapshot {
     return this.runtimeBridge.getSessionStatus();
+  }
+
+  async screenshot(input: BrowserScreenshotInput): Promise<BrowserScreenshotResult> {
+    this.assertConnected();
+    const parsed = parseBrowserCommandRequest('browser_screenshot', input);
+    const commandResult = await this.runtimeBridge.executeBrowserCommand(
+      'browser_screenshot',
+      {
+        type: parsed.type,
+        quality: parsed.quality,
+        fullPage: parsed.fullPage,
+        omitBackground: parsed.omitBackground,
+      },
+      { tabId: parsed.tabId },
+    );
+    if (commandResult.result.encoding === 'file') {
+      return summarizeScreenshotResult(commandResult);
+    }
+
+    const stored = await storeBrowserScreenshot(commandResult.result);
+    return summarizeScreenshotResult({
+      ...commandResult,
+      result: { ...stored },
+    });
   }
 
   async newTab(input: CreateTabInput): Promise<BrowserCommandResult> {
@@ -69,6 +96,30 @@ export class BrowserSessionService {
       throw new RuntimeBridgeError('Browser runtime is not connected.', 'RUNTIME_DISCONNECTED');
     }
   }
+}
+
+function summarizeScreenshotResult(commandResult: BrowserCommandResult): BrowserScreenshotResult {
+  if (typeof commandResult.result.path !== 'string' || commandResult.result.path.length === 0) {
+    throw new RuntimeBridgeError(
+      'Browser screenshot did not return a file path.',
+      'EXECUTION_FAILED',
+    );
+  }
+
+  return {
+    result: {
+      path: commandResult.result.path,
+      ...(typeof commandResult.result.sizeBytes === 'number'
+        ? { sizeBytes: commandResult.result.sizeBytes }
+        : {}),
+    },
+    timingMs: commandResult.timingMs,
+    tab: {
+      tabId: commandResult.tab.tabId,
+      url: commandResult.tab.url,
+      title: commandResult.tab.title,
+    },
+  };
 }
 
 function selectRuntimeForTab(

@@ -3,9 +3,11 @@ import {
 } from '@shared/script-schema';
 import type {
   BrowserCommandResult,
+  BrowserScreenshotResult,
   ScriptExecutionHistoryEntry,
 } from '@shared/protocol';
 import type { CreateTabInput, WaitEventsInput } from '@shared/browser-command-contracts';
+import type { BrowserScreenshotInput } from '@shared/browser-command-contracts';
 import { builtinScripts, builtinScriptRecords } from './scripts/builtin-scripts';
 import type {
   ExecuteScriptRequest,
@@ -89,6 +91,10 @@ export class WebCapAgentApp implements WebCapAgentService {
 
   async scriptRegistryList(): Promise<ScriptDefinition[]> {
     return await this.scriptRegistryService.buildRegisteredScriptRegistry();
+  }
+
+  async browserScreenshot(input: BrowserScreenshotInput): Promise<BrowserScreenshotResult> {
+    return await this.browserSessionService.screenshot(input);
   }
 
   async browserNewTab(input: CreateTabInput): Promise<BrowserCommandResult> {

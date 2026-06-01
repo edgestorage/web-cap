@@ -41,7 +41,7 @@ Agent 可以在页面内运行 JavaScript，组合内置能力，并把有用脚
 
 - 页面内执行，脚本可以直接访问 DOM 和页面状态。
 - 能力复用，成功脚本可以被搜索、查看并再次调用。
-- 脚本组合，一个脚本可以通过 `cap.call(...)` 调用另一个脚本。
+- 已废弃：脚本组合，即一个脚本通过 `cap.call(...)` 调用另一个脚本。
 - 可选的执行后观察，在启用证据采集时脚本运行可以返回页面变化证据。
 - 本地持久化，让 agent 学到的工作流不只存在于单次运行中。
 - 命令行访问，让 agent 可以在普通 CLI 工作流中使用同一套浏览器能力。
@@ -135,7 +135,7 @@ pnpm cli session-status
 
 在选定的浏览器标签页中执行脚本。脚本接收一个对象参数，并返回一个 JSON 对象。
 
-`script-execute` 支持 `--timeout-ms`、`--script-file`、`--input-file`、`--register` 等可选执行配置。脚本执行期间，可以通过 `cap.call(scriptId, input)` 调用其他脚本。`--register` 只会在执行成功且结果包含 `ok: true` 时保存内联脚本。
+`script-execute` 支持 `--timeout-ms`、`--script-file`、`--input-file`、`--register` 等可选执行配置。`--register` 只会在执行成功且结果包含 `ok: true` 时保存内联脚本。
 
 ### 浏览器命令
 
@@ -147,21 +147,22 @@ Web Cap 还包括 `browser-new-tab`、`session-status`、`wait-events` 等命令
 
 ```js
 export default async function (input) {
-  const page = await cap.call('builtin.page.inspect', {});
+  const heading = await page.locator('h1').first().textContent().catch(() => '');
 
   return {
     ok: true,
-    title: page.title,
+    title: document.title,
+    heading,
     selector: input.selector,
   };
 }
 ```
 
-运行时会在脚本执行期间注入 `cap`。
+运行时会在脚本执行期间注入 `page` 和 `cap.page`。
 
 可用 runtime helper：
 
-- `cap.call(scriptId, input)` - 调用内置脚本或已注册脚本。
+- 已废弃：`cap.call(scriptId, input)` - 调用内置脚本或已注册脚本。
 - `cap.get(scriptId)` - 读取某个脚本的 schema 摘要。
 - `cap.list()` - 列出当前可调用脚本的 schema 摘要。
 

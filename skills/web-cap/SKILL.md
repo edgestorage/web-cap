@@ -125,6 +125,14 @@ web-cap script-execute --tab-id <tab-id> --script "export default async function
 
 When a script operates on page content, prefer the Playwright-compatible runtime APIs exposed as global `page` and `cap.page`. Use `page.locator(...)`, role/text helpers, and locator actions instead of hand-rolled DOM clicks or form mutations.
 
+If the target element cannot be determined confidently from roles, text, selectors, or DOM state, capture a screenshot before taking action. Use visual confirmation to disambiguate the target and avoid guessing, especially when controls have similar labels, icons, or repeated layouts.
+
+Use `browser-screenshot` with the tab id from `session-status`:
+
+```bash
+web-cap browser-screenshot --tab-id <tab-id> --pretty
+```
+
 Example form interaction:
 
 ```javascript

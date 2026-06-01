@@ -20,6 +20,7 @@ export type BrowserCommandName =
   | 'click_element'
   | 'fill_input'
   | 'navigate'
+  | 'browser_screenshot'
   | 'create_tab'
   | 'wait_events';
 
@@ -64,6 +65,7 @@ export interface ExecuteScriptPayload {
   tabId?: number;
   activateTab?: boolean;
   evidence?: ExecutionEvidenceOption[];
+  screenshotArtifactBasePath?: string;
 }
 
 export interface BrowserCommandPayload {
@@ -115,6 +117,15 @@ export interface ExecutionResultPayload {
   result: Record<string, unknown>;
   evidence: ExecutionEvidence;
   status?: 'succeeded' | 'interrupted';
+  screenshotArtifacts?: RuntimeScreenshotArtifactPayload[];
+}
+
+export interface RuntimeScreenshotArtifactPayload {
+  kind: 'screenshot';
+  path: string;
+  transferId: string;
+  mimeType: string;
+  type: 'png' | 'jpeg';
 }
 
 export interface RuntimeErrorPayload {
@@ -130,6 +141,16 @@ export interface BrowserCommandResultPayload {
 
 export interface BrowserCommandEventPayload {
   event: Record<string, unknown>;
+}
+
+export interface RuntimeBinaryPayloadStartPayload {
+  transferId: string;
+  kind: 'screenshot';
+  mimeType: string;
+  type: 'png' | 'jpeg';
+  byteLength: number;
+  resultShape: 'path' | 'metadata';
+  path?: string;
 }
 
 export interface ScriptHistorySyncPayload {
@@ -196,6 +217,13 @@ export type RuntimeEnvelope =
       requestId: string;
       timestamp: string;
       payload: BrowserCommandEventPayload;
+    }
+  | {
+      type: 'binary_payload_start';
+      sessionId: string;
+      requestId: string;
+      timestamp: string;
+      payload: RuntimeBinaryPayloadStartPayload;
     }
   | {
       type: 'execution_result';
@@ -268,6 +296,15 @@ export interface BrowserCommandResult {
   result: Record<string, unknown>;
   timingMs: number;
   tab: RuntimeTabSnapshot;
+}
+
+export interface BrowserScreenshotResult {
+  result: {
+    path: string;
+    sizeBytes?: number;
+  };
+  timingMs: number;
+  tab: RuntimeTabSummary;
 }
 
 export interface RuntimeConnectionSnapshot {

@@ -5,11 +5,13 @@ import type {
 } from '@shared/script-schema';
 import type {
   BrowserCommandResult,
+  BrowserScreenshotResult,
   RuntimeSessionSnapshot,
   ScriptExecutionHistoryEntry,
 } from '@shared/protocol';
 import { DEFAULT_EXECUTION_TIMEOUT_MS } from '@shared/protocol';
 import type {
+  BrowserScreenshotInput,
   CreateTabInput,
   WaitEventsInput,
 } from '@shared/browser-command-contracts';
@@ -215,6 +217,10 @@ export class WebCapRpcServer {
         const params = parseRpcInput(request.method, request.params);
         return await this.app.browserNewTab(params);
       }
+      case 'browserScreenshot': {
+        const params = parseRpcInput(request.method, request.params);
+        return await this.app.browserScreenshot(params);
+      }
       case 'browserWaitEvents': {
         const params = parseRpcInput(request.method, request.params);
         return await this.app.browserWaitEvents(params, emitEvent);
@@ -267,6 +273,13 @@ export class WebCapRpcClient {
       'browserNewTab',
       input as Record<string, unknown>,
     )) as BrowserCommandResult;
+  }
+
+  async browserScreenshot(input: BrowserScreenshotInput): Promise<BrowserScreenshotResult> {
+    return (await this.requestWithRuntimeReconnectGrace(
+      'browserScreenshot',
+      input as Record<string, unknown>,
+    )) as BrowserScreenshotResult;
   }
 
   async browserWaitEvents(

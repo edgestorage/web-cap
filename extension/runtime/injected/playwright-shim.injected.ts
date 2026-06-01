@@ -1,7 +1,7 @@
 /* eslint-disable */
 import type { PlaywrightShimDeps, RuntimeMethodTable, ScriptPlaywrightPage } from './playwright-shim-types.injected';
 import { createLocator } from './playwright-locator.injected';
-import { cssEscape, hideHighlightOverlay, notImplemented, queryLocatorSelectorAll, timeoutFromOptions, waitForLocator } from './playwright-shim-helpers.injected';
+import { cssEscape, hideHighlightOverlay, notImplemented, pressKeyOnElement, queryLocatorSelectorAll, timeoutFromOptions, waitForLocator } from './playwright-shim-helpers.injected';
 
 export function createPlaywrightPageApi(deps: PlaywrightShimDeps): ScriptPlaywrightPage {
 let defaultTimeoutMs = 5000;
@@ -253,6 +253,53 @@ function createPageApi(): ScriptPlaywrightPage {
         deltaX: Number(deltaX ?? 0),
         deltaY: Number(deltaY ?? 0),
       });
+    },
+  };
+  const activeKeyboardTarget = () => {
+    const element = document.activeElement;
+    if (element instanceof HTMLElement) {
+      return element;
+    }
+    if (document.body instanceof HTMLElement) {
+      return document.body;
+    }
+    throw new Error('page.keyboard requires an active HTMLElement target.');
+  };
+  const keyboardDelay = async (options: { delay?: unknown } = {}) => {
+    const delay = Math.max(Number(options.delay ?? 0), 0);
+    if (delay > 0) {
+      await deps.wait(delay);
+    }
+  };
+  const dispatchKeyboardOnly = async (type: string, key: unknown) => {
+    const target = activeKeyboardTarget();
+    target.dispatchEvent(new KeyboardEvent(type, {
+      key: String(key ?? ''),
+      bubbles: true,
+      cancelable: true,
+    }));
+    await deps.waitForManagedInput();
+  };
+  const keyboardApi: RuntimeMethodTable = {
+    async down(key: unknown) {
+      await dispatchKeyboardOnly('keydown', key);
+    },
+    async up(key: unknown) {
+      await dispatchKeyboardOnly('keyup', key);
+    },
+    async press(key: unknown, options: { delay?: unknown } = {}) {
+      await pressKeyOnElement(activeKeyboardTarget(), key, deps);
+      await keyboardDelay(options);
+    },
+    async type(text: unknown, options: { delay?: unknown } = {}) {
+      const value = String(text ?? '');
+      for (const char of value) {
+        await pressKeyOnElement(activeKeyboardTarget(), char, deps);
+        await keyboardDelay(options);
+      }
+    },
+    async insertText(text: unknown, options: { delay?: unknown } = {}) {
+      await keyboardApi.type(text, options);
     },
   };
   const sameOriginFrameElements = () =>
@@ -666,6 +713,7 @@ function createPageApi(): ScriptPlaywrightPage {
   };
   pageApi.__frameForElement = createFrameApi;
   Object.assign(pageApi, {
+    keyboard: keyboardApi,
     mouse: mouseApi,
     async $(selector: unknown) {
       return queryLocatorSelectorAll(String(selector))[0] ?? null;
@@ -981,7 +1029,14 @@ function createPageApi(): ScriptPlaywrightPage {
         }
       }
       const result = await browserCommand<{ data?: string }>('Page.captureScreenshot', params);
-      return result.data ?? result;
+      if (typeof result.data !== 'string' || result.data.length === 0) {
+        throw new Error('Page.captureScreenshot returned no image data.');
+      }
+      const data = result.data;
+      const mimeType = format === 'jpeg' ? 'image/jpeg' : 'image/png';
+      return deps.createScreenshotArtifact
+        ? deps.createScreenshotArtifact({ data, mimeType, type: format })
+        : { data, mimeType, type: format };
     },
     async setDefaultNavigationTimeout(timeout: unknown) {
       defaultTimeoutMs = Math.max(Number(timeout) || 0, 0);

@@ -6,6 +6,12 @@ export type ScriptPlaywrightPage = RuntimeMethodTable & { __playwrightPageType?:
 export type ScriptPlaywrightLocator = RuntimeMethodTable & { __playwrightLocatorType?: PlaywrightLocator };
 export type LocatorQuery = () => Element[];
 
+export interface RuntimeScreenshotArtifactInput {
+  data: string;
+  mimeType: string;
+  type: 'png' | 'jpeg';
+}
+
 export type PlaywrightShimDeps = {
   wait(ms: number): Promise<unknown>;
   typeIntoElement(element: unknown, value: unknown): Promise<void>;
@@ -13,6 +19,7 @@ export type PlaywrightShimDeps = {
   useDomKeyboardFallback(): boolean;
   browserCommand?(method: string, params?: Record<string, unknown>): Promise<unknown>;
   browserEvent?(method: string, params?: Record<string, unknown>, timeoutMs?: number): Promise<unknown>;
+  createScreenshotArtifact?(input: RuntimeScreenshotArtifactInput): Record<string, unknown>;
   recordEvidenceEvent?(type: string, value: unknown): void;
   waitForManagedInput(): Promise<void>;
 };

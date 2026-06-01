@@ -26,12 +26,17 @@ export class DebuggerScriptExecutor {
     return this.client.isAvailable();
   }
 
+  getDebuggerClient(): ChromeDebuggerClient {
+    return this.client;
+  }
+
   async executeScript(
     tabId: number,
     scriptDefinition: ScriptDefinition,
     input: Record<string, unknown>,
     scriptRegistry: ScriptDefinition[],
     evidence: ExecutionEvidenceOption[] = [],
+    screenshotArtifactBasePath?: string,
   ): Promise<ScriptExecutionResponse> {
     if (!this.isAvailable()) {
       throw new Error('chrome.debugger is not available in this browser runtime.');
@@ -64,12 +69,15 @@ export class DebuggerScriptExecutor {
             managedWindowBridgeFunctionName: windowBridge.bridgeFunctionName,
             managedTimerBridgeFunctionName: timerBridge.bridgeFunctionName,
             managedBrowserBridgeFunctionName: browserBridge.bridgeFunctionName,
+            screenshotArtifactBasePath,
             evidence,
           }),
           awaitPromise: true,
           returnByValue: true,
           userGesture: true,
           allowUnsafeEvalBlockedByCSP: true,
+        }, {
+          timeoutMs: scriptDefinition.script.timeoutMs,
         });
       } finally {
         await browserBridge.dispose();

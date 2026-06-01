@@ -512,7 +512,14 @@ export function createLocator(
         params.quality = Number(options.quality);
       }
       const result = await deps.browserCommand('Page.captureScreenshot', params) as { data?: string };
-      return result.data ?? result;
+      if (typeof result.data !== 'string' || result.data.length === 0) {
+        throw new Error('Page.captureScreenshot returned no image data.');
+      }
+      const data = result.data;
+      const mimeType = format === 'jpeg' ? 'image/jpeg' : 'image/png';
+      return deps.createScreenshotArtifact
+        ? deps.createScreenshotArtifact({ data, mimeType, type: format })
+        : { data, mimeType, type: format };
     },
     async setChecked(checked: unknown, options?: unknown) {
       const shouldBeChecked = Boolean(checked);
