@@ -135,6 +135,13 @@ async function applyConfiguredScriptExecutionOptions(
     };
   }
 
+  if (config.mouseTrajectorySimulation === true) {
+    request.options = {
+      ...request.options,
+      mouseTrajectorySimulation: true,
+    };
+  }
+
   if (evidence.length > 0) {
     request.options = {
       ...request.options,

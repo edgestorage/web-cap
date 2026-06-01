@@ -37,6 +37,7 @@ export class DebuggerScriptExecutor {
     scriptRegistry: ScriptDefinition[],
     evidence: ExecutionEvidenceOption[] = [],
     screenshotArtifactBasePath?: string,
+    mouseTrajectorySimulation = false,
   ): Promise<ScriptExecutionResponse> {
     if (!this.isAvailable()) {
       throw new Error('chrome.debugger is not available in this browser runtime.');
@@ -53,6 +54,7 @@ export class DebuggerScriptExecutor {
         await this.managedInputBridgeFactory.createManagedClickBridge(
           target,
           executionScope,
+          { mouseTrajectorySimulation },
         );
       const keyboardBridge =
         await this.managedInputBridgeFactory.createManagedKeyboardBridge(target, executionScope);

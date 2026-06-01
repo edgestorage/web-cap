@@ -431,6 +431,44 @@ describe('WebCapAgentApp', () => {
     expect(execution.result).toEqual({ ok: true });
   });
 
+  it('passes mouse trajectory simulation option to the browser runtime', async () => {
+    await connectRuntime((envelope) => {
+      if (envelope.type !== 'execute_script') {
+        return;
+      }
+
+      expect(envelope.payload.mouseTrajectorySimulation).toBe(true);
+
+      client?.send(
+        JSON.stringify(
+          createRuntimeEnvelope(
+            'execution_result',
+            {
+              result: { ok: true },
+              evidence: {
+                url: 'https://example.com/form',
+                events: [],
+                screenshots: [],
+              },
+            },
+            { sessionId: 'runtime-session', requestId: envelope.requestId },
+          ),
+        ),
+      );
+    });
+
+    const execution = await app.scriptExecute({
+      script: 'export default async function () { return { ok: true }; }',
+      input: {},
+      options: {
+        tabId: 101,
+        mouseTrajectorySimulation: true,
+      },
+    });
+
+    expect(execution.result).toEqual({ ok: true });
+  });
+
   it('executes script source with a temporary local id and persists it to local history', async () => {
     await connectRuntime((envelope) => {
       if (envelope.type !== 'execute_script') {

@@ -18,6 +18,7 @@ export const executeScriptOptionsSchema = z
       .optional(),
     activateTab: z.boolean().optional(),
     evidence: z.array(z.enum(WEB_CAP_EVIDENCE_OPTIONS)).optional(),
+    mouseTrajectorySimulation: z.boolean().optional(),
   })
   .default({});
 
@@ -137,6 +138,10 @@ export const mcpToolDefinitions: {
             .array(z.enum(WEB_CAP_EVIDENCE_OPTIONS))
             .optional()
             .describe('Evidence to collect for the script run. Use multiple entries such as ["events", "visibleElements"], or ["all"]. Defaults to ["common"].'),
+          mouseTrajectorySimulation: z
+            .boolean()
+            .optional()
+            .describe('When true, browser-level managed mouse input sends a multi-step movement path before press/release. Defaults to false.'),
         })
         .describe('Optional execution settings for the script run.')
         .optional(),

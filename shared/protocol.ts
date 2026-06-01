@@ -66,6 +66,7 @@ export interface ExecuteScriptPayload {
   activateTab?: boolean;
   evidence?: ExecutionEvidenceOption[];
   screenshotArtifactBasePath?: string;
+  mouseTrajectorySimulation?: boolean;
 }
 
 export interface BrowserCommandPayload {
@@ -323,6 +324,7 @@ export interface ExecuteScriptOptions {
   scriptRegistry?: ScriptDefinition[];
   activateTab?: boolean;
   evidence?: ExecutionEvidenceOption[];
+  mouseTrajectorySimulation?: boolean;
   includeTabInResult?: boolean;
 }
 

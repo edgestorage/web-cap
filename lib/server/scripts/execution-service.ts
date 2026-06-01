@@ -38,6 +38,7 @@ export interface ExecutionPlan {
   timeoutMs: number;
   activateTab?: boolean;
   evidence: ExecutionEvidenceOption[];
+  mouseTrajectorySimulation?: boolean;
   includeTabInResult: boolean;
   historyMode: 'temporary' | 'permanent';
 }
@@ -143,6 +144,7 @@ export class ScriptExecutionService {
       timeoutMs: scriptDefinition.script.timeoutMs,
       activateTab: options.activateTab,
       evidence: normalizeEvidenceOptions(options.evidence),
+      mouseTrajectorySimulation: options.mouseTrajectorySimulation,
       includeTabInResult: options.tabId === undefined,
       historyMode,
     };
@@ -154,6 +156,7 @@ export class ScriptExecutionService {
       scriptRegistry: plan.registry,
       activateTab: plan.activateTab,
       evidence: plan.evidence,
+      mouseTrajectorySimulation: plan.mouseTrajectorySimulation,
       includeTabInResult: plan.includeTabInResult,
     });
   }

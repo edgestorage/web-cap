@@ -177,6 +177,14 @@ describe('WEB_CAP CLI', () => {
         value: true,
       },
     });
+    expect(parseCliArgs(['config', 'set', 'mouseTrajectorySimulation', 'true'])).toEqual({
+      name: 'config',
+      options: {
+        action: 'set',
+        key: 'mouseTrajectorySimulation',
+        value: true,
+      },
+    });
     expect(parseCliArgs(['config', 'set', 'evidence', 'events,visibleElements'])).toEqual({
       name: 'config',
       options: {
@@ -525,7 +533,7 @@ describe('WEB_CAP CLI', () => {
     expect(stdout.trim()).toBe(JSON.stringify(JSON.parse(stdout)));
   });
 
-  it('persists config and applies activateTab to script execution', async () => {
+  it('persists config and applies configured script execution options', async () => {
     tempDir = await mkdtemp(join(tmpdir(), 'web-cap-cli-test-'));
     process.env.WEB_CAP_STATE_DIR = tempDir;
     const calls: ExecuteScriptRequest[] = [];
@@ -595,6 +603,30 @@ describe('WEB_CAP CLI', () => {
     });
 
     stdout = '';
+    const setMouseTrajectoryCode = await runCli(
+      ['config', 'set', 'mouseTrajectorySimulation', 'true'],
+      {
+        stdout: { write: (chunk: string) => { stdout += chunk; return true; } },
+        stderr: { write: (chunk: string) => { stderr += chunk; return true; } },
+      },
+      async () => {
+        throw new Error('config should not connect to daemon');
+      },
+    );
+
+    expect(setMouseTrajectoryCode).toBe(0);
+    expect(stderr).toBe('');
+    expect(JSON.parse(stdout)).toMatchObject({
+      key: 'mouseTrajectorySimulation',
+      value: true,
+      config: {
+        activateTabOnScriptExecute: true,
+        evidence: ['events', 'visibleElements'],
+        mouseTrajectorySimulation: true,
+      },
+    });
+
+    stdout = '';
     const executeCode = await runCli(
       [
         'script-execute',
@@ -620,6 +652,7 @@ describe('WEB_CAP CLI', () => {
           tabId: 9,
           activateTab: true,
           evidence: ['events', 'visibleElements'],
+          mouseTrajectorySimulation: true,
         },
       },
     ]);

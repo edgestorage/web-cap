@@ -58,6 +58,10 @@ interface PointerPosition {
   y: number;
 }
 
+interface ManagedClickBridgeOptions {
+  mouseTrajectorySimulation?: boolean;
+}
+
 export interface ManagedInputBridgeExecutionScope {
   executionId: string;
   timerBridgeFunctionName?: string;
@@ -90,6 +94,7 @@ export class ManagedInputBridgeFactory {
   async createManagedClickBridge(
     target: DebuggeeTarget,
     scope: ManagedInputBridgeExecutionScope = this.createExecutionScope(),
+    options: ManagedClickBridgeOptions = {},
   ): Promise<ManagedInputBridge> {
     const bridgeSuffix = this.createBridgeSuffix(scope, 'click');
     const bindingName = `__webCapDebuggerClickBinding_${bridgeSuffix}`;
@@ -119,6 +124,7 @@ export class ManagedInputBridgeFactory {
         resolverStoreName,
         event.payload,
         scope.timerBridgeFunctionName,
+        options,
       );
     };
     this.client.getChromeApi()?.debugger?.onEvent?.addListener(listener);
@@ -352,6 +358,7 @@ export class ManagedInputBridgeFactory {
     resolverStoreName: string,
     payloadJson: string,
     timerBridgeFunctionName?: string,
+    options: ManagedClickBridgeOptions = {},
   ): Promise<void> {
     let payload: DebuggerManagedClickPayload | undefined;
     try {
@@ -365,7 +372,7 @@ export class ManagedInputBridgeFactory {
     }
 
     try {
-      await this.dispatchManagedMouse(target, payload);
+      await this.dispatchManagedMouse(target, payload, options);
       await this.waitForPageInputSettled(target, timerBridgeFunctionName);
       await this.resolveManagedPromise(target, resolverStoreName, payload.id);
     } catch (error) {
@@ -528,6 +535,7 @@ export class ManagedInputBridgeFactory {
   private async dispatchManagedMouse(
     target: DebuggeeTarget,
     payload: DebuggerManagedClickPayload,
+    options: ManagedClickBridgeOptions = {},
   ): Promise<void> {
     const x = Number.isFinite(payload.clientX) ? payload.clientX : 0;
     const y = Number.isFinite(payload.clientY) ? payload.clientY : 0;
@@ -536,7 +544,10 @@ export class ManagedInputBridgeFactory {
     const from =
       this.pointerPositions.get(target.tabId) ??
       this.getInitialPointerPosition(x, y, payload.debug);
-    const movePath = isBackgroundMouse ? [{ x, y }] : this.buildMouseMovePath(from, { x, y });
+    const movePath =
+      isBackgroundMouse || options.mouseTrajectorySimulation !== true
+        ? [{ x, y }]
+        : this.buildMouseMovePath(from, { x, y });
     let dispatchedAllMoveEvents = true;
     for (const [index, point] of movePath.entries()) {
       const dispatched = await this.sendMouseEvent(

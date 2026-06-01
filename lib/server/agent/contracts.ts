@@ -25,6 +25,7 @@ export interface ExecuteScriptOptions {
   timeoutMs?: number;
   activateTab?: boolean;
   evidence?: ExecutionEvidenceOption[];
+  mouseTrajectorySimulation?: boolean;
 }
 
 export type ExecuteScriptResult = ScriptExecutionResult;

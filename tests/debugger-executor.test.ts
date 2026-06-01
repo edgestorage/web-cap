@@ -28,7 +28,7 @@ describe('DebuggerScriptExecutor', () => {
     }
   });
 
-  it('dispatches CDP mouse events for managed clicks', async () => {
+  it('dispatches direct CDP mouse events for managed clicks by default', async () => {
     const commands: DebuggerCommand[] = [];
     const listeners = new Set<DebuggerEventListener>();
     let bindingName = '';
@@ -150,11 +150,11 @@ export default async function () {
         y: params.y,
         buttons: params.buttons,
       }));
-    expect(mouseEvents.length).toBeGreaterThan(3);
+    expect(mouseEvents).toHaveLength(3);
     expect(mouseEvents[0]).toEqual({
       type: 'mouseMoved',
-      x: 143,
-      y: 86,
+      x: 120,
+      y: 45,
       buttons: 0,
     });
     expect(mouseEvents.at(-3)).toEqual({
@@ -516,7 +516,146 @@ export default async function () {
     });
   });
 
-  it('moves from the last pointer position on subsequent clicks in the same tab', async () => {
+  it('simulates a CDP mouse trajectory when enabled', async () => {
+    const commands: DebuggerCommand[] = [];
+    const listeners = new Set<DebuggerEventListener>();
+    let bindingName = '';
+
+    (globalThis as typeof globalThis & { chrome?: unknown }).chrome = {
+      debugger: {
+        attach: (_target: { tabId: number }, _version: string, callback: () => void) => callback(),
+        detach: (_target: { tabId: number }, callback: () => void) => callback(),
+        sendCommand: (
+          target: { tabId: number },
+          method: string,
+          params: Record<string, unknown>,
+          callback: (result?: unknown) => void,
+        ) => {
+          commands.push({ method, params });
+
+          if (method === 'Runtime.addBinding') {
+            const name = String(params.name);
+            if (name.includes('ClickBinding')) {
+              bindingName = name;
+            }
+            callback({});
+            return;
+          }
+
+          if (method === 'Runtime.evaluate') {
+            const expression = String(params.expression ?? '');
+            if (
+              expression.includes('__webCapManagedClickResolvers_') &&
+              expression.includes('globalThis[bridgeFunctionName] = (payload) =>')
+            ) {
+              callback({ result: { type: 'undefined' } });
+              return;
+            }
+
+            if (expression.includes('entry.resolve();')) {
+              callback({ result: { type: 'undefined' } });
+              return;
+            }
+
+            if (expression.includes('delete globalThis[bridgeFunctionName];')) {
+              callback({ result: { type: 'undefined' } });
+              return;
+            }
+
+            if (expression.includes('managedClickBridgeFunctionName')) {
+              for (const listener of listeners) {
+                listener(target, 'Runtime.bindingCalled', {
+                  name: bindingName,
+                  payload: JSON.stringify({
+                    id: 'click-1',
+                    clientX: 120,
+                    clientY: 45,
+                    debug: {
+                      viewport: {
+                        innerWidth: 300,
+                        innerHeight: 200,
+                      },
+                    },
+                  }),
+                });
+              }
+              callback(successEvaluationResult({ clicked: true }));
+              return;
+            }
+          }
+
+          callback({});
+        },
+        onEvent: {
+          addListener: (listener: DebuggerEventListener) => {
+            listeners.add(listener);
+          },
+          removeListener: (listener: DebuggerEventListener) => {
+            listeners.delete(listener);
+          },
+        },
+      },
+      runtime: {
+        lastError: undefined,
+      },
+    };
+
+    const executor = new DebuggerScriptExecutor(60_000);
+    const script = createDebuggerActionScript({
+      id: 'click.test',
+      name: 'Click Test',
+      summary: 'Trigger a click.',
+      outputProperties: {
+        clicked: { type: 'boolean' },
+      },
+      outputRequired: ['clicked'],
+      code: `
+export default async function () {
+  document.querySelector('button').click();
+  return { clicked: true };
+}
+      `,
+    });
+
+    await executor.executeScript(7, script, {}, [], [], undefined, true);
+
+    const mouseEvents = commands
+      .filter(({ method }) => method === 'Input.dispatchMouseEvent')
+      .map(({ params }) => ({
+        type: params.type,
+        x: params.x,
+        y: params.y,
+        buttons: params.buttons,
+      }));
+
+    expect(mouseEvents.length).toBeGreaterThan(3);
+    expect(mouseEvents[0]).toEqual({
+      type: 'mouseMoved',
+      x: 143,
+      y: 86,
+      buttons: 0,
+    });
+    expect(mouseEvents.at(-3)).toEqual({
+      type: 'mouseMoved',
+      x: 120,
+      y: 45,
+      buttons: 0,
+    });
+    expect(mouseEvents.at(-2)).toEqual({
+      type: 'mousePressed',
+      x: 120,
+      y: 45,
+      buttons: 1,
+    });
+    expect(mouseEvents.at(-1)).toEqual({
+      type: 'mouseReleased',
+      x: 120,
+      y: 45,
+      buttons: 0,
+    });
+  });
+
+  it('moves from the last pointer position on subsequent clicks when trajectory simulation is enabled', async () => {
     const commands: DebuggerCommand[] = [];
     const listeners = new Set<DebuggerEventListener>();
     let bindingName = '';
@@ -633,8 +772,8 @@ export default async function () {
       `,
     });
 
-    await executor.executeScript(7, script, {}, []);
-    await executor.executeScript(7, script, {}, []);
+    await executor.executeScript(7, script, {}, [], [], undefined, true);
+    await executor.executeScript(7, script, {}, [], [], undefined, true);
 
     const mouseEvents = commands
       .filter(({ method }) => method === 'Input.dispatchMouseEvent')

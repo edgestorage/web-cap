@@ -8,6 +8,7 @@ export const WEB_CAP_CONFIG_FILE_NAME = 'config.json';
 export const WEB_CAP_CONFIG_KEYS = [
   'activateTabOnScriptExecute',
   'evidence',
+  'mouseTrajectorySimulation',
 ] as const;
 export const WEB_CAP_EVIDENCE_OPTIONS = ['events', 'visibleElements', 'common', 'all'] as const;
 
@@ -15,6 +16,7 @@ const webCapConfigSchema = z
   .object({
     activateTabOnScriptExecute: z.boolean().optional(),
     evidence: z.array(z.enum(WEB_CAP_EVIDENCE_OPTIONS)).optional(),
+    mouseTrajectorySimulation: z.boolean().optional(),
   })
   .default({});
 

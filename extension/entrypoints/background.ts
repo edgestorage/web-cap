@@ -177,6 +177,7 @@ class RuntimeClient {
           envelope.payload.activateTab,
           envelope.payload.evidence ?? [],
           envelope.payload.screenshotArtifactBasePath,
+          envelope.payload.mouseTrajectorySimulation === true,
         );
         break;
       case 'browser_command':
@@ -207,6 +208,7 @@ class RuntimeClient {
     activateTab?: boolean,
     evidenceOptions: ExecutionEvidenceOption[] = ['common'],
     screenshotArtifactBasePath?: string,
+    mouseTrajectorySimulation = false,
   ): Promise<void> {
     let selectedTab: BrowserTabLike | undefined;
     try {
@@ -265,6 +267,7 @@ class RuntimeClient {
           scriptRegistry,
           evidenceOptions,
           screenshotArtifactBasePath,
+          mouseTrajectorySimulation,
         );
       } catch (error) {
         if (!isExecutionInterruptedByNavigationError(error)) {
@@ -380,6 +383,7 @@ class RuntimeClient {
     scriptRegistry: ScriptDefinition[],
     evidence: ExecutionEvidenceOption[],
     screenshotArtifactBasePath?: string,
+    mouseTrajectorySimulation = false,
   ): Promise<ScriptExecutionResponse> {
     const requiresBrowserLevelClick = scriptRequiresBrowserLevelClick(
       scriptDefinition,
@@ -408,6 +412,7 @@ class RuntimeClient {
         scriptRegistry,
         evidence,
         screenshotArtifactBasePath,
+        mouseTrajectorySimulation,
       );
     }
 
@@ -439,6 +444,7 @@ class RuntimeClient {
         scriptRegistry,
         evidence,
         screenshotArtifactBasePath,
+        mouseTrajectorySimulation,
       );
     }
   }

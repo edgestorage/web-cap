@@ -448,7 +448,8 @@ function formatCommanderError(error: unknown): string {
 function parseConfigKeyOption(value: string): WebCapConfigKey {
   if (
     value === 'activateTabOnScriptExecute' ||
-    value === 'evidence'
+    value === 'evidence' ||
+    value === 'mouseTrajectorySimulation'
   ) {
     return value;
   }
