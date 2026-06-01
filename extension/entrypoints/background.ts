@@ -216,16 +216,23 @@ class RuntimeClient {
     } catch (error) {
       this.sendError(
         requestId,
-        'EXECUTION_FAILED',
-        error instanceof Error ? error.message : String(error),
+        tabId === undefined ? 'EXECUTION_FAILED' : 'TAB_NOT_FOUND',
+        tabId === undefined
+          ? error instanceof Error ? error.message : String(error)
+          : `Browser tab ${tabId} was not found.`,
         { scriptId: scriptDefinition.id, tabId },
       );
       return;
     }
     if (!selectedTab?.id || !selectedTab.url) {
-      this.sendError(requestId, 'TAB_NOT_FOUND', 'No active browser tab is available.', {
-        scriptId: scriptDefinition.id,
-      });
+      this.sendError(
+        requestId,
+        'TAB_NOT_FOUND',
+        tabId === undefined
+          ? 'No active browser tab is available.'
+          : `Browser tab ${tabId} was not found.`,
+        { scriptId: scriptDefinition.id, tabId },
+      );
       return;
     }
     let activeTab: ExecutableBrowserTab = {
@@ -461,16 +468,23 @@ class RuntimeClient {
     } catch (error) {
       this.sendError(
         requestId,
-        'EXECUTION_FAILED',
-        error instanceof Error ? error.message : String(error),
+        tabId === undefined ? 'EXECUTION_FAILED' : 'TAB_NOT_FOUND',
+        tabId === undefined
+          ? error instanceof Error ? error.message : String(error)
+          : `Browser tab ${tabId} was not found.`,
         { command, tabId },
       );
       return;
     }
     if (!activeTab?.id || !activeTab.url) {
-      this.sendError(requestId, 'TAB_NOT_FOUND', 'No active browser tab is available.', {
-        command,
-      });
+      this.sendError(
+        requestId,
+        'TAB_NOT_FOUND',
+        tabId === undefined
+          ? 'No active browser tab is available.'
+          : `Browser tab ${tabId} was not found.`,
+        { command, tabId },
+      );
       return;
     }
 

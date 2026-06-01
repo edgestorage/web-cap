@@ -393,6 +393,23 @@ describe('WebCapAgentApp', () => {
     expect(execution.tab).toBeUndefined();
   });
 
+  it('reports a missing explicit script execution tab as tab not found', async () => {
+    await connectRuntime();
+
+    await expect(
+      app.scriptExecute({
+        script: 'export default async function () { return { ok: true }; }',
+        input: {},
+        options: {
+          tabId: 999,
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: 'TAB_NOT_FOUND',
+      message: 'Browser tab 999 was not found.',
+    });
+  });
+
   it('passes evidence execution options to the browser runtime', async () => {
     await connectRuntime((envelope) => {
       if (envelope.type !== 'execute_script') {

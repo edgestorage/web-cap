@@ -214,15 +214,20 @@ export class WebSocketRuntimeBridge implements RuntimeBridge {
   ): Promise<ScriptExecutionResult> {
     const target = this.findRuntimeForExecution(options.tabId);
     if (!target || target.runtime.socket.readyState !== target.runtime.socket.OPEN) {
-      throw new RuntimeBridgeError('No browser runtime is connected.', 'RUNTIME_DISCONNECTED');
+      throw this.createTargetUnavailableError(options.tabId);
     }
 
-    const tab =
-      target.runtime.snapshot.tabs.find((candidate) => candidate.tabId === options.tabId) ??
-      target.runtime.snapshot.activeTab;
+    const tab = options.tabId === undefined
+      ? target.runtime.snapshot.activeTab
+      : target.runtime.snapshot.tabs.find((candidate) => candidate.tabId === options.tabId);
 
     if (!tab) {
-      throw new RuntimeBridgeError('No target tab is available for execution.', 'TAB_NOT_FOUND');
+      throw new RuntimeBridgeError(
+        options.tabId === undefined
+          ? 'No target tab is available for execution.'
+          : `Browser tab ${options.tabId} was not found.`,
+        'TAB_NOT_FOUND',
+      );
     }
 
     const requestId = randomUUID();
@@ -305,16 +310,18 @@ export class WebSocketRuntimeBridge implements RuntimeBridge {
   ): Promise<BrowserCommandResult> {
     const target = this.findRuntimeForExecution(options.tabId);
     if (!target || target.runtime.socket.readyState !== target.runtime.socket.OPEN) {
-      throw new RuntimeBridgeError('No browser runtime is connected.', 'RUNTIME_DISCONNECTED');
+      throw this.createTargetUnavailableError(options.tabId);
     }
 
-    const tab =
-      target.runtime.snapshot.tabs.find((candidate) => candidate.tabId === options.tabId) ??
-      target.runtime.snapshot.activeTab;
+    const tab = options.tabId === undefined
+      ? target.runtime.snapshot.activeTab
+      : target.runtime.snapshot.tabs.find((candidate) => candidate.tabId === options.tabId);
 
     if (!tab) {
       throw new RuntimeBridgeError(
-        'No target tab is available for browser command.',
+        options.tabId === undefined
+          ? 'No target tab is available for browser command.'
+          : `Browser tab ${options.tabId} was not found.`,
         'TAB_NOT_FOUND',
       );
     }
@@ -442,6 +449,7 @@ export class WebSocketRuntimeBridge implements RuntimeBridge {
           return { sessionId, runtime };
         }
       }
+      return undefined;
     }
 
     const activeRuntime = this.activeSessionId
@@ -458,6 +466,14 @@ export class WebSocketRuntimeBridge implements RuntimeBridge {
 
     const [sessionId, runtime] = first.value;
     return { sessionId, runtime };
+  }
+
+  private createTargetUnavailableError(tabId?: number): RuntimeBridgeError {
+    if (tabId !== undefined && this.runtimes.size > 0) {
+      return new RuntimeBridgeError(`Browser tab ${tabId} was not found.`, 'TAB_NOT_FOUND');
+    }
+
+    return new RuntimeBridgeError('No browser runtime is connected.', 'RUNTIME_DISCONNECTED');
   }
 
   private async handleEnvelope(socket: WebSocket, envelope: RuntimeEnvelope): Promise<void> {

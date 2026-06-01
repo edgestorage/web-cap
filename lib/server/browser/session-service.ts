@@ -84,7 +84,12 @@ export class BrowserSessionService {
     const runtime = selectRuntimeForTab(session.runtimes, tabId);
     const tab = selectTabForRuntime(runtime, session.activeTab, session.tabs, tabId);
     if (!tab) {
-      throw new RuntimeBridgeError('No active browser tab is available.', 'TAB_NOT_FOUND');
+      throw new RuntimeBridgeError(
+        tabId === undefined
+          ? 'No active browser tab is available.'
+          : `Browser tab ${tabId} was not found.`,
+        'TAB_NOT_FOUND',
+      );
     }
 
     return { runtime, tab };
