@@ -65,11 +65,26 @@ Use one-off inline scripts only for very small reads such as `document.title`, `
 
 ## Script Files
 
+When using saved reusable Web Cap scripts:
+
+- Resolve `WEB_CAP_PATH`; if it is not defined, use `.web-cap` in the current working directory.
+- Look under `${WEB_CAP_PATH}/<domain>/` for scripts that match the target site or workflow.
+- Read `${WEB_CAP_PATH}/<domain>/README.md` when it exists before running a saved script.
+- Execute saved scripts with `script-execute --tab-id <tab-id> --script-file <path>`.
+- When saving a new reusable script, write it to `${WEB_CAP_PATH}/<domain>/<capability-name>.js`.
+- Follow `references/how-to-write-reusable-scripts.md` for reusable script metadata, naming, and README format.
+
 For reusable automation, write a normal script file and call it whenever needed:
 
 ```javascript
-// scripts/example.com/read-page-summary.js
-// Purpose: Read a compact summary of the current example.com page.
+/**
+ * web-cap script
+ *
+ * @description Read a compact summary of the current page.
+ * @param {object} input
+ * @param {number} [input.limit] Optional maximum number of links/items to return.
+ * @webCapPages https://example.com/articles/:articleId, https://example.com/docs/*
+ */
 export default async function (input) {
   const heading = await page.locator("h1").first().textContent().catch(() => "");
   const links = await page.locator("a").evaluateAll((items, limit) =>
@@ -91,15 +106,14 @@ export default async function (input) {
 ```
 
 ```bash
-web-cap script-execute --tab-id <tab-id> --script-file scripts/example.com/read-page-summary.js --input '{"limit":10}'
+web-cap script-execute --tab-id <tab-id> --script-file .web-cap/example.com/read-page-summary.js --input '{"limit":10}'
 ```
 
 Organize reusable scripts by the site's primary domain:
 
-- Put reusable site scripts under `scripts/<primary-domain>/`, such as `scripts/example.com/read-page-summary.js` or `scripts/github.com/fill-search-form.js`.
+- Put reusable site scripts under `${WEB_CAP_PATH}/<domain>/`, such as `.web-cap/example.com/read-page-summary.js` or `.web-cap/github.com/fill-search-form.js`.
 - Use the registrable site domain as the directory name when possible, without protocol, path, or query string.
 - Use action-and-object file names, such as `read-page-summary.js`, `extract-search-results.js`, or `fill-login-form.js`.
-- Add a short purpose comment near the top of each script that describes what the script does and which page or workflow it targets.
 - Prefer `--script-file` for anything longer than a tiny one-off read. Pass variable data through `--input` or `--input-file`.
 - Return an object with at least `ok`. On failure, return `ok: false` with `error`, `details`, `url`, and `title` when available.
 
