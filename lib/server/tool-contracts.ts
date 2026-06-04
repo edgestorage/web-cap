@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { readdir } from 'node:fs/promises';
+import { readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   MAX_EXECUTION_TIMEOUT_MS,
@@ -13,6 +13,10 @@ import { WEB_CAP_EVIDENCE_OPTIONS } from '../config';
 import type { WebCapAgentService } from './agent/contracts';
 import { browserCommandRequestSchemas } from './browser/command-contracts';
 import { RuntimeBridgeError } from './runtime/runtime-bridge';
+
+const ACTIVE_TAB_AVAILABLE_SCRIPT_LIMIT = 10;
+const INACTIVE_TAB_AVAILABLE_SCRIPT_LIMIT = 3;
+const TOTAL_AVAILABLE_SCRIPT_LIMIT = 30;
 
 export const executeScriptOptionsSchema = z
   .object({
@@ -215,10 +219,16 @@ export async function executeCoreTool(
   }
 }
 
-interface SessionStatusReusableScriptSummary {
-  domain: string | null;
+interface SessionStatusAvailableScriptSummary {
+  site: string | null;
   count: number;
   directory: string | null;
+  scripts: string[];
+}
+
+interface AvailableScriptDirectorySummary {
+  count: number;
+  scripts: string[];
 }
 
 interface SessionStatusTabResult {
@@ -241,9 +251,9 @@ interface SessionStatusRuntimeResult {
 
 interface SessionStatusResult {
   connected: boolean;
-  reusableScripts: {
+  availableScripts: {
     webCapPath: string;
-    domains: SessionStatusReusableScriptSummary[];
+    sites: SessionStatusAvailableScriptSummary[];
   };
   runtimes: SessionStatusRuntimeResult[];
 }
@@ -252,17 +262,17 @@ async function formatSessionStatusResult(
   status: RuntimeSessionSnapshot,
 ): Promise<SessionStatusResult> {
   const webCapPath = resolveWebCapPath(process.env);
-  const scriptCountCache = new Map<string, Promise<number>>();
+  const scriptSummaryCache = new Map<string, Promise<AvailableScriptDirectorySummary>>();
   const runtimes = statusRuntimes(status).map(formatRuntime);
 
   return {
     connected: status.connected,
-    reusableScripts: {
+    availableScripts: {
       webCapPath,
-      domains: await summarizeReusableScriptDomains(
-        collectRuntimeTabs(runtimes),
+      sites: await summarizeAvailableScriptSites(
+        runtimes,
         webCapPath,
-        scriptCountCache,
+        scriptSummaryCache,
       ),
     },
     runtimes,
@@ -344,47 +354,111 @@ function tabKey(runtime: SessionStatusRuntimeResult, tab: SessionStatusTabResult
   return `${runtime.sessionId ?? 'runtime'}:${tab.tabId}`;
 }
 
-async function summarizeReusableScriptDomains(
-  tabs: SessionStatusTabResult[],
+async function summarizeAvailableScriptSites(
+  runtimes: SessionStatusRuntimeResult[],
   webCapPath: string,
-  scriptCountCache: Map<string, Promise<number>>,
-): Promise<SessionStatusReusableScriptSummary[]> {
-  const domains = [...new Set(tabs.map((tab) => domainForUrl(tab.url)).filter(isString))].sort();
-  const summaries = domains.map(async (domain) => {
+  scriptSummaryCache: Map<string, Promise<AvailableScriptDirectorySummary>>,
+): Promise<SessionStatusAvailableScriptSummary[]> {
+  const activeDomains = collectActiveDomains(runtimes);
+  const tabs = collectRuntimeTabs(runtimes);
+  const domains = [...new Set(tabs.flatMap((tab) => domainsForUrl(tab.url)))].sort();
+  domains.sort(
+    (left, right) =>
+      Number(activeDomains.has(right)) - Number(activeDomains.has(left)) ||
+      left.localeCompare(right),
+  );
+  let remainingScriptLimit = TOTAL_AVAILABLE_SCRIPT_LIMIT;
+  const summaries: SessionStatusAvailableScriptSummary[] = [];
+
+  for (const domain of domains) {
     const directory = join(webCapPath, domain);
-    let count = scriptCountCache.get(domain);
-    if (!count) {
-      count = countReusableScripts(directory);
-      scriptCountCache.set(domain, count);
+    let summary = scriptSummaryCache.get(domain);
+    if (!summary) {
+      summary = summarizeAvailableScripts(directory);
+      scriptSummaryCache.set(domain, summary);
     }
+    const resolved = await summary;
+    const domainScriptLimit = activeDomains.has(domain)
+      ? ACTIVE_TAB_AVAILABLE_SCRIPT_LIMIT
+      : INACTIVE_TAB_AVAILABLE_SCRIPT_LIMIT;
+    const scripts = resolved.scripts.slice(
+      0,
+      Math.min(domainScriptLimit, remainingScriptLimit),
+    );
+    remainingScriptLimit -= scripts.length;
 
-    return {
-      domain,
-      count: await count,
+    summaries.push({
+      site: domain,
+      count: resolved.count,
       directory,
-    };
-  });
+      scripts,
+    });
+  }
 
-  return (await Promise.all(summaries)).filter((summary) => summary.count > 0);
+  return summaries.filter((summary) => summary.count > 0);
 }
 
-function isString(value: string | null): value is string {
-  return typeof value === 'string';
-}
-
-function domainForUrl(value: string): string | null {
+function domainsForUrl(value: string): string[] {
   try {
     const url = new URL(value);
-    return url.hostname.toLowerCase() || null;
+    const hostname = url.hostname.toLowerCase();
+    if (!hostname) {
+      return [];
+    }
+
+    const domains = [hostname];
+    if (hostname.startsWith('www.')) {
+      domains.push(hostname.slice(4));
+    }
+    return domains;
   } catch {
-    return null;
+    return [];
   }
 }
 
-async function countReusableScripts(directory: string): Promise<number> {
+function collectActiveDomains(runtimes: SessionStatusRuntimeResult[]): Set<string> {
+  const domains = new Set<string>();
+  for (const runtime of runtimes) {
+    if (!runtime.activeTab) {
+      continue;
+    }
+    for (const domain of domainsForUrl(runtime.activeTab.url)) {
+      domains.add(domain);
+    }
+  }
+  return domains;
+}
+
+async function summarizeAvailableScripts(
+  directory: string,
+): Promise<AvailableScriptDirectorySummary> {
   try {
     const entries = await readdir(directory, { withFileTypes: true });
-    return entries.filter((entry) => entry.isFile() && entry.name.endsWith('.js')).length;
+    const files = entries
+      .filter((entry) => entry.isFile() && entry.name.endsWith('.js'))
+      .map((entry) => entry.name);
+    const scripts = await Promise.all(
+      files.map(async (name) => ({
+        name,
+        lastUsedAt: await getLastAccessedAt(join(directory, name)),
+      })),
+    );
+
+    scripts.sort(
+      (left, right) => right.lastUsedAt - left.lastUsedAt || left.name.localeCompare(right.name),
+    );
+    return {
+      count: scripts.length,
+      scripts: scripts.map((script) => script.name),
+    };
+  } catch {
+    return { count: 0, scripts: [] };
+  }
+}
+
+async function getLastAccessedAt(filePath: string): Promise<number> {
+  try {
+    return (await stat(filePath)).atimeMs;
   } catch {
     return 0;
   }

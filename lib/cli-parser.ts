@@ -497,7 +497,7 @@ function createUserScriptParser(): Command {
 
 function createSessionStatusParser(): Command {
   return createJsonOutputParser('session-status').description(
-    'Print browser runtime status, known tabs, and reusable script counts by tab domain.',
+    'Print browser runtime status, known tabs, and available script counts by tab site.',
   );
 }
 

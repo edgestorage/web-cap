@@ -10,6 +10,7 @@ When the user wants to save a Web Cap script for reuse, store it under the curre
 When the user wants to find reusable Web Cap scripts, check these locations:
 
 - Current Web Cap capability folder: `${WEB_CAP_PATH}`. If `WEB_CAP_PATH` is not defined, use `.web-cap` in the current working directory.
+- If `web-cap session-status` returns `availableScripts.sites[]`, use each entry's `directory` as the first place to inspect with `ls`.
 
 Within that location, look for domain directories and scripts that follow `<domain>/<capability-name>.js`, and read `<domain>/README.md` when it exists before running a script.
 

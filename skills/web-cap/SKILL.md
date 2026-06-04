@@ -43,6 +43,7 @@ Use the result to decide the next step:
 - If the extension is installed but still disconnected, ask the user to confirm that the `web_cap` extension is enabled and that a normal `http` or `https` tab is open.
 - If `session-status` lists multiple tabs, choose the tab that matches the user's requested title or URL. Do not guess a tab id when the target is ambiguous.
 - If the intended tab is not listed, ask the user to open or focus the target page, then run `web-cap session-status` again.
+- If `session-status` returns `availableScripts.sites` for the target page, inspect the listed site directory before writing a new script or doing non-trivial page-specific work.
 - Do not run `script-execute` until you have a specific `--tab-id` from `session-status`.
 
 ## Run Scripts
@@ -68,6 +69,7 @@ Use one-off inline scripts only for very small reads such as `document.title`, `
 When using saved reusable Web Cap scripts:
 
 - Resolve `WEB_CAP_PATH`; if it is not defined, use `.web-cap` in the current working directory.
+- When `session-status` shows `availableScripts.sites[]` entries for the target page, run `ls <directory>` on the listed directory to see whether an existing script can be reused.
 - Look under `${WEB_CAP_PATH}/<domain>/` for scripts that match the target site or workflow.
 - Read `${WEB_CAP_PATH}/<domain>/README.md` when it exists before running a saved script.
 - Execute saved scripts with `script-execute --tab-id <tab-id> --script-file <path>`.

@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile, rm, utimes } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -677,23 +677,60 @@ describe('WEB_CAP CLI', () => {
     expect(stdout).toContain('\n  "connected": false');
   });
 
-  it('prints session status grouped by runtime with reusable script counts', async () => {
+  it('prints session status grouped by runtime with available script counts', async () => {
     tempDir = await mkdtemp(join(tmpdir(), 'web-cap-cli-test-'));
     process.env.WEB_CAP_PATH = tempDir;
     await mkdir(join(tempDir, 'github.com'), { recursive: true });
+    const readIssueScript = 'export default async function () { return { ok: true, issue: 1 }; }';
+    const readIssuePath = join(tempDir, 'github.com', 'read-issue.js');
     await writeFile(
-      join(tempDir, 'github.com', 'read-issue.js'),
-      'export default async function () {}',
+      readIssuePath,
+      readIssueScript,
     );
     await writeFile(
       join(tempDir, 'github.com', 'fill-search.js'),
       'export default async function () {}',
+    );
+    for (let index = 1; index <= 10; index += 1) {
+      const extraPath = join(tempDir, 'github.com', `extra-${String(index).padStart(2, '0')}.js`);
+      await writeFile(
+        extraPath,
+        `export default async function () { return { ok: true, index: ${index} }; }`,
+      );
+      await utimes(
+        extraPath,
+        new Date('2020-01-01T00:00:00.000Z'),
+        new Date('2020-01-01T00:00:00.000Z'),
+      );
+    }
+    await utimes(
+      join(tempDir, 'github.com', 'fill-search.js'),
+      new Date('2020-01-01T00:00:00.000Z'),
+      new Date('2020-01-01T00:00:00.000Z'),
     );
     await writeFile(join(tempDir, 'github.com', 'README.md'), '# github.com scripts');
     await mkdir(join(tempDir, 'example.com'), { recursive: true });
     await writeFile(
       join(tempDir, 'example.com', 'read-page.js'),
       'export default async function () {}',
+    );
+    await mkdir(join(tempDir, 'inactive.example'), { recursive: true });
+    for (const name of ['open-dashboard.js', 'read-list.js', 'submit-form.js', 'update-filter.js']) {
+      const inactiveScriptPath = join(tempDir, 'inactive.example', name);
+      await writeFile(
+        inactiveScriptPath,
+        `export default async function () { return { ok: true, name: ${JSON.stringify(name)} }; }`,
+      );
+      await utimes(
+        inactiveScriptPath,
+        new Date('2020-01-01T00:00:00.000Z'),
+        new Date('2020-01-01T00:00:00.000Z'),
+      );
+    }
+    await utimes(
+      readIssuePath,
+      new Date('2030-01-01T00:00:00.000Z'),
+      new Date('2026-05-15T00:00:00.000Z'),
     );
 
     const service = createService({
@@ -757,7 +794,7 @@ describe('WEB_CAP CLI', () => {
               extensionVersion: '1.2.3',
               activeTab: {
                 tabId: 7,
-                url: 'https://example.com/docs',
+                url: 'https://www.example.com/docs',
                 title: 'Docs',
                 site: 'generic-web',
                 readyState: 'complete',
@@ -766,7 +803,7 @@ describe('WEB_CAP CLI', () => {
               tabs: [
                 {
                   tabId: 7,
-                  url: 'https://example.com/docs',
+                  url: 'https://www.example.com/docs',
                   title: 'Docs',
                   site: 'generic-web',
                   readyState: 'complete',
@@ -776,6 +813,14 @@ describe('WEB_CAP CLI', () => {
                   tabId: 8,
                   url: 'https://empty.example/docs',
                   title: 'Empty Docs',
+                  site: 'generic-web',
+                  readyState: 'complete',
+                  updatedAt: '2026-05-15T00:00:00.000Z',
+                },
+                {
+                  tabId: 9,
+                  url: 'https://inactive.example/docs',
+                  title: 'Inactive Docs',
                   site: 'generic-web',
                   readyState: 'complete',
                   updatedAt: '2026-05-15T00:00:00.000Z',
@@ -805,18 +850,37 @@ describe('WEB_CAP CLI', () => {
     const parsed = JSON.parse(stdout) as Record<string, any>;
     expect(parsed).toEqual({
       connected: true,
-      reusableScripts: {
+      availableScripts: {
         webCapPath: tempDir,
-        domains: [
+        sites: [
           {
-            domain: 'example.com',
+            site: 'example.com',
             count: 1,
             directory: join(tempDir, 'example.com'),
+            scripts: ['read-page.js'],
           },
           {
-            domain: 'github.com',
-            count: 2,
+            site: 'github.com',
+            count: 12,
             directory: join(tempDir, 'github.com'),
+            scripts: [
+              'read-issue.js',
+              'extra-01.js',
+              'extra-02.js',
+              'extra-03.js',
+              'extra-04.js',
+              'extra-05.js',
+              'extra-06.js',
+              'extra-07.js',
+              'extra-08.js',
+              'extra-09.js',
+            ],
+          },
+          {
+            site: 'inactive.example',
+            count: 4,
+            directory: join(tempDir, 'inactive.example'),
+            scripts: ['open-dashboard.js', 'read-list.js', 'submit-form.js'],
           },
         ],
       },
@@ -850,7 +914,7 @@ describe('WEB_CAP CLI', () => {
           lastSeenAt: '2026-05-15T00:00:02.000Z',
           activeTab: {
             tabId: 7,
-            url: 'https://example.com/docs',
+            url: 'https://www.example.com/docs',
             title: 'Docs',
             site: 'generic-web',
             readyState: 'complete',
@@ -858,7 +922,7 @@ describe('WEB_CAP CLI', () => {
           tabs: [
             {
               tabId: 7,
-              url: 'https://example.com/docs',
+              url: 'https://www.example.com/docs',
               title: 'Docs',
               site: 'generic-web',
               readyState: 'complete',
@@ -870,21 +934,28 @@ describe('WEB_CAP CLI', () => {
               site: 'generic-web',
               readyState: 'complete',
             },
+            {
+              tabId: 9,
+              url: 'https://inactive.example/docs',
+              title: 'Inactive Docs',
+              site: 'generic-web',
+              readyState: 'complete',
+            },
           ],
         },
       ],
     });
-    expect(parsed.reusableScripts.domains).not.toEqual(
-      expect.arrayContaining([expect.objectContaining({ domain: 'empty.example' })]),
+    expect(parsed.availableScripts.sites).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ site: 'empty.example' })]),
     );
     expect(parsed).not.toHaveProperty('lastActiveTab');
     expect(parsed).not.toHaveProperty('tabs');
     expect(parsed).not.toHaveProperty('authenticatedSites');
     expect(parsed.runtimes[0]).not.toHaveProperty('authenticatedSites');
     expect(parsed.runtimes[0].tabs[0]).not.toHaveProperty('updatedAt');
-    expect(parsed.runtimes[0].tabs[0]).not.toHaveProperty('reusableScripts');
+    expect(parsed.runtimes[0].tabs[0]).not.toHaveProperty('availableScripts');
     expect(parsed.runtimes[1].tabs[0]).not.toHaveProperty('updatedAt');
-    expect(parsed.runtimes[1].tabs[0]).not.toHaveProperty('reusableScripts');
+    expect(parsed.runtimes[1].tabs[0]).not.toHaveProperty('availableScripts');
   });
 
   it('runs the stdio MCP adapter as a CLI command', async () => {
