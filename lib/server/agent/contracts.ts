@@ -1,4 +1,4 @@
-import type { ScriptDefinition } from '@shared/script-schema';
+import type { ScriptDefinition, UserScriptDefinition } from '@shared/script-schema';
 import type {
   BrowserCommandResult,
   BrowserScreenshotResult,
@@ -20,6 +20,14 @@ export interface ExecuteScriptRequest {
   register?: boolean;
 }
 
+export interface InstallUserScriptRequest {
+  filePath: string;
+}
+
+export interface RemoveUserScriptRequest {
+  id: string;
+}
+
 export interface ExecuteScriptOptions {
   tabId?: number;
   timeoutMs?: number;
@@ -36,6 +44,9 @@ export interface WebCapAgentService {
   scriptExecute(request: ExecuteScriptRequest): Promise<ExecuteScriptResult>;
   scriptHistoryList(limit?: number): Promise<ScriptExecutionHistoryEntry[]>;
   scriptRegistryList(): Promise<ScriptDefinition[]>;
+  userScriptInstall(request: InstallUserScriptRequest): Promise<UserScriptDefinition>;
+  userScriptList(): Promise<UserScriptDefinition[]>;
+  userScriptRemove(request: RemoveUserScriptRequest): Promise<UserScriptDefinition>;
   browserScreenshot(input: BrowserScreenshotInput): Promise<BrowserScreenshotResult>;
   browserNewTab(input: CreateTabInput): Promise<BrowserCommandResult>;
   browserWaitEvents(

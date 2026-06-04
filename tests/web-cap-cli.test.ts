@@ -33,6 +33,15 @@ describe('WEB_CAP CLI', () => {
       async scriptRegistryList() {
         return [];
       },
+      async userScriptInstall() {
+        throw new Error('not used');
+      },
+      async userScriptList() {
+        return [];
+      },
+      async userScriptRemove() {
+        throw new Error('not used');
+      },
       async browserScreenshot() {
         throw new Error('not used');
       },
@@ -207,6 +216,41 @@ describe('WEB_CAP CLI', () => {
     });
   });
 
+  it('parses userscript commands', () => {
+    expect(parseCliArgs(['userscript', 'list', '--pretty'])).toEqual({
+      name: 'userscript',
+      options: {
+        action: 'list',
+        pretty: true,
+      },
+    });
+    expect(parseCliArgs(['userscript', 'install', '--file', './foo.js'])).toEqual({
+      name: 'userscript',
+      options: {
+        action: 'install',
+        file: './foo.js',
+      },
+    });
+    expect(parseCliArgs(['userscript', 'remove', 'userscript.foo'])).toEqual({
+      name: 'userscript',
+      options: {
+        action: 'remove',
+        id: 'userscript.foo',
+      },
+    });
+    expect(parseCliArgs(['userscript', 'show', 'userscript.foo', '--pretty'])).toEqual({
+      name: 'userscript',
+      options: {
+        action: 'show',
+        id: 'userscript.foo',
+        pretty: true,
+      },
+    });
+    expect(() => parseCliArgs(['userscript', 'install'])).toThrow(/--file/);
+    expect(() => parseCliArgs(['userscript', 'remove'])).toThrow(/requires an id/);
+    expect(() => parseCliArgs(['userscript', 'show'])).toThrow(/requires an id/);
+  });
+
   it('prints top-level help with expanded script-execute guidance only', async () => {
     let stdout = '';
     let stderr = '';
@@ -358,6 +402,154 @@ describe('WEB_CAP CLI', () => {
     ]);
   });
 
+  it('routes userscript commands through the injected service', async () => {
+    const calls: string[] = [];
+    const service = createService({
+      async userScriptInstall(request) {
+        calls.push(`install:${request.filePath}`);
+        return {
+          id: 'userscript.foo',
+          name: 'Foo',
+          version: '1.0.0',
+          status: 'active',
+          matches: ['https://example.com/*'],
+          runAt: 'document-idle',
+          code: 'console.log("foo");',
+          sourcePath: request.filePath,
+          installedAt: '2026-06-04T00:00:00.000Z',
+          updatedAt: '2026-06-04T00:00:00.000Z',
+        };
+      },
+      async userScriptList() {
+        calls.push('list');
+        return [
+          {
+            id: 'userscript.foo',
+            name: 'Foo',
+            version: '1.0.0',
+            status: 'active',
+            matches: ['https://example.com/*'],
+            runAt: 'document-idle',
+            code: 'console.log("foo");',
+            installedAt: '2026-06-04T00:00:00.000Z',
+            updatedAt: '2026-06-04T00:00:00.000Z',
+          },
+        ];
+      },
+      async userScriptRemove(request) {
+        calls.push(`remove:${request.id}`);
+        return {
+          id: request.id,
+          name: 'Foo',
+          version: '1.0.0',
+          status: 'active',
+          matches: ['https://example.com/*'],
+          runAt: 'document-idle',
+          code: 'console.log("foo");',
+          installedAt: '2026-06-04T00:00:00.000Z',
+          updatedAt: '2026-06-04T00:00:00.000Z',
+        };
+      },
+      sessionStatus() {
+        return {
+          connected: true,
+          tabs: [],
+          authenticatedSites: [],
+          userScriptsAvailable: true,
+        };
+      },
+    });
+
+    let stdout = '';
+    let stderr = '';
+    let code = await runCli(
+      ['userscript', 'install', '--file', './foo.js'],
+      {
+        stdout: { write: (chunk: string) => { stdout += chunk; return true; } },
+        stderr: { write: (chunk: string) => { stderr += chunk; return true; } },
+      },
+      async () => service,
+    );
+
+    expect(code).toBe(0);
+    expect(stderr).toBe('');
+    expect(JSON.parse(stdout)).toMatchObject({ id: 'userscript.foo' });
+
+    stdout = '';
+    code = await runCli(
+      ['userscript', 'list'],
+      {
+        stdout: { write: (chunk: string) => { stdout += chunk; return true; } },
+        stderr: { write: (chunk: string) => { stderr += chunk; return true; } },
+      },
+      async () => service,
+    );
+
+    expect(code).toBe(0);
+    expect(JSON.parse(stdout)).toMatchObject({
+      userscripts: [{ id: 'userscript.foo' }],
+    });
+
+    stdout = '';
+    code = await runCli(
+      ['userscript', 'show', 'userscript.foo'],
+      {
+        stdout: { write: (chunk: string) => { stdout += chunk; return true; } },
+        stderr: { write: (chunk: string) => { stderr += chunk; return true; } },
+      },
+      async () => service,
+    );
+
+    expect(code).toBe(0);
+    expect(JSON.parse(stdout)).toMatchObject({ id: 'userscript.foo' });
+
+    stdout = '';
+    code = await runCli(
+      ['userscript', 'remove', 'userscript.foo'],
+      {
+        stdout: { write: (chunk: string) => { stdout += chunk; return true; } },
+        stderr: { write: (chunk: string) => { stderr += chunk; return true; } },
+      },
+      async () => service,
+    );
+
+    expect(code).toBe(0);
+    expect(JSON.parse(stdout)).toMatchObject({ id: 'userscript.foo' });
+    expect(calls).toEqual(['install:./foo.js', 'list', 'list', 'remove:userscript.foo']);
+  });
+
+  it('prints a userscript support notice for userscript commands', async () => {
+    const service = createService({
+      async userScriptList() {
+        return [];
+      },
+      sessionStatus() {
+        return {
+          connected: true,
+          tabs: [],
+          authenticatedSites: [],
+          userScriptsAvailable: false,
+        };
+      },
+    });
+    let stdout = '';
+    let stderr = '';
+
+    const code = await runCli(
+      ['userscript', 'list'],
+      {
+        stdout: { write: (chunk: string) => { stdout += chunk; return true; } },
+        stderr: { write: (chunk: string) => { stderr += chunk; return true; } },
+      },
+      async () => service,
+    );
+
+    expect(code).toBe(0);
+    expect(JSON.parse(stdout)).toEqual({ userscripts: [] });
+    expect(stderr).toContain('WEB_CAP userscript notice');
+    expect(stderr).toContain('chrome.userScripts');
+  });
+
   it('prints compact JSON by default and formatted JSON with --pretty', async () => {
     const service = createService({
       sessionStatus() {
@@ -476,6 +668,15 @@ describe('WEB_CAP CLI', () => {
       },
       async scriptRegistryList() {
         return [];
+      },
+      async userScriptInstall() {
+        throw new Error('not used');
+      },
+      async userScriptList() {
+        return [];
+      },
+      async userScriptRemove() {
+        throw new Error('not used');
       },
       async browserScreenshot() {
         throw new Error('not used');
@@ -670,6 +871,15 @@ describe('WEB_CAP CLI', () => {
       },
       async scriptRegistryList() {
         return [];
+      },
+      async userScriptInstall() {
+        throw new Error('not used');
+      },
+      async userScriptList() {
+        return [];
+      },
+      async userScriptRemove() {
+        throw new Error('not used');
       },
       async browserScreenshot() {
         throw new Error('not used');

@@ -1,4 +1,4 @@
-import type { ScriptDefinition } from '@shared/script-schema';
+import type { ScriptDefinition, UserScriptDefinition } from '@shared/script-schema';
 import {
   DEFAULT_RUNTIME_PORT,
   RUNTIME_HEARTBEAT_INTERVAL_MS,
@@ -33,6 +33,9 @@ const SCRIPT_HISTORY_STORAGE_KEY = 'scriptExecutionHistory';
 const SCRIPT_HISTORY_UPDATED_AT_STORAGE_KEY = 'scriptExecutionHistoryUpdatedAt';
 const SCRIPT_REGISTRY_STORAGE_KEY = 'scriptRegistry';
 const SCRIPT_REGISTRY_UPDATED_AT_STORAGE_KEY = 'scriptRegistryUpdatedAt';
+const USERSCRIPT_REGISTRY_STORAGE_KEY = 'userScriptRegistry';
+const USERSCRIPT_REGISTRY_UPDATED_AT_STORAGE_KEY = 'userScriptRegistryUpdatedAt';
+const USERSCRIPT_AVAILABLE_STORAGE_KEY = 'userScriptsAvailable';
 const EXECUTION_TITLE_PREFIX = '[WEB_CAP 执行中]';
 const EXECUTION_TAB_INDICATOR_TIMEOUT_MS = 1_000;
 
@@ -77,6 +80,21 @@ interface VisibleElementsDebugTiming {
   diffTimingMs: number;
 }
 
+interface ChromeUserScriptsLike {
+  userScripts?: {
+    register?(scripts: UserScriptRegistration[]): Promise<void>;
+    unregister?(filter?: { ids?: string[] }): Promise<void>;
+  };
+}
+
+interface UserScriptRegistration {
+  id: string;
+  js: Array<{ code: string }>;
+  matches: string[];
+  runAt: UserScriptDefinition['runAt'];
+  world?: 'USER_SCRIPT' | 'MAIN';
+}
+
 type ExecutionEvidenceWithDebugTiming = ExecutionEvidence & {
   visibleElementsDebugTiming?: VisibleElementsDebugTiming;
 };
@@ -100,6 +118,7 @@ class RuntimeClient {
   }, this.debuggerExecutor.getDebuggerClient());
 
   start(): void {
+    void this.restoreCachedUserScripts();
     this.connect();
     this.installTabListeners();
   }
@@ -121,6 +140,7 @@ class RuntimeClient {
             extensionVersion: browser.runtime.getManifest().version,
             protocolVersion: PROTOCOL_VERSION,
             authenticatedSites,
+            userScriptsAvailable: this.isUserScriptsAvailable(),
           },
           {
             sessionId: this.sessionId,
@@ -193,6 +213,9 @@ class RuntimeClient {
         break;
       case 'script_registry_sync':
         await this.storeScriptRegistry(envelope.payload.scripts, envelope.timestamp);
+        break;
+      case 'userscript_registry_sync':
+        await this.storeUserScriptRegistry(envelope.payload.userscripts, envelope.timestamp);
         break;
       default:
         break;
@@ -569,6 +592,9 @@ class RuntimeClient {
         AUTHENTICATED_SITES_KEY,
         SCRIPT_HISTORY_STORAGE_KEY,
         SCRIPT_HISTORY_UPDATED_AT_STORAGE_KEY,
+        USERSCRIPT_REGISTRY_STORAGE_KEY,
+        USERSCRIPT_REGISTRY_UPDATED_AT_STORAGE_KEY,
+        USERSCRIPT_AVAILABLE_STORAGE_KEY,
       ]);
       const update: Record<string, unknown> = {};
 
@@ -582,6 +608,18 @@ class RuntimeClient {
 
       if (typeof stored[SCRIPT_HISTORY_UPDATED_AT_STORAGE_KEY] !== 'string') {
         update[SCRIPT_HISTORY_UPDATED_AT_STORAGE_KEY] = '';
+      }
+
+      if (!Array.isArray(stored[USERSCRIPT_REGISTRY_STORAGE_KEY])) {
+        update[USERSCRIPT_REGISTRY_STORAGE_KEY] = [];
+      }
+
+      if (typeof stored[USERSCRIPT_REGISTRY_UPDATED_AT_STORAGE_KEY] !== 'string') {
+        update[USERSCRIPT_REGISTRY_UPDATED_AT_STORAGE_KEY] = '';
+      }
+
+      if (typeof stored[USERSCRIPT_AVAILABLE_STORAGE_KEY] !== 'boolean') {
+        update[USERSCRIPT_AVAILABLE_STORAGE_KEY] = this.isUserScriptsAvailable();
       }
 
       if (Object.keys(update).length > 0) {
@@ -747,6 +785,75 @@ class RuntimeClient {
     await browser.storage.local.set({
       [SCRIPT_REGISTRY_STORAGE_KEY]: scripts,
       [SCRIPT_REGISTRY_UPDATED_AT_STORAGE_KEY]: updatedAt,
+    });
+  }
+
+  private async storeUserScriptRegistry(
+    userscripts: UserScriptDefinition[],
+    updatedAt: string,
+  ): Promise<void> {
+    await browser.storage.local.set({
+      [USERSCRIPT_REGISTRY_STORAGE_KEY]: userscripts,
+      [USERSCRIPT_REGISTRY_UPDATED_AT_STORAGE_KEY]: updatedAt,
+    });
+    await this.applyUserScriptRegistry(userscripts);
+  }
+
+  private async restoreCachedUserScripts(): Promise<void> {
+    const stored = await browser.storage.local.get(USERSCRIPT_REGISTRY_STORAGE_KEY);
+    const userscripts = Array.isArray(stored[USERSCRIPT_REGISTRY_STORAGE_KEY])
+      ? (stored[USERSCRIPT_REGISTRY_STORAGE_KEY] as UserScriptDefinition[])
+      : [];
+    await this.applyUserScriptRegistry(userscripts);
+  }
+
+  private async applyUserScriptRegistry(userscripts: UserScriptDefinition[]): Promise<void> {
+    const userScriptsApi = this.getChromeUserScriptsApi();
+    if (!userScriptsApi?.register || !userScriptsApi.unregister) {
+      console.warn('[WEB_CAP] chrome.userScripts.register is not available.');
+      await this.storeUserScriptsAvailability(false);
+      return;
+    }
+
+    try {
+      await userScriptsApi.unregister();
+      const activeScripts = userscripts
+        .filter((script) => script.status === 'active')
+        .map((script) => ({
+          id: script.id,
+          matches: script.matches,
+          runAt: script.runAt,
+          world: 'USER_SCRIPT' as const,
+          js: [{ code: script.code }],
+        }));
+      for (const script of activeScripts) {
+        try {
+          await userScriptsApi.register([script]);
+        } catch (error) {
+          console.warn('[WEB_CAP] failed to register userscript:', script.id, error);
+        }
+      }
+      await this.storeUserScriptsAvailability(true);
+    } catch (error) {
+      console.warn('[WEB_CAP] chrome.userScripts.register failed:', error);
+      await this.storeUserScriptsAvailability(false);
+    }
+  }
+
+  private getChromeUserScriptsApi(): ChromeUserScriptsLike['userScripts'] | undefined {
+    return (globalThis as typeof globalThis & { chrome?: ChromeUserScriptsLike }).chrome
+      ?.userScripts;
+  }
+
+  private isUserScriptsAvailable(): boolean {
+    const userScriptsApi = this.getChromeUserScriptsApi();
+    return typeof userScriptsApi?.register === 'function' &&
+      typeof userScriptsApi.unregister === 'function';
+  }
+
+  private async storeUserScriptsAvailability(available: boolean): Promise<void> {
+    await browser.storage.local.set({
+      [USERSCRIPT_AVAILABLE_STORAGE_KEY]: available,
     });
   }
 

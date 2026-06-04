@@ -42,11 +42,18 @@ export interface ConfigCliOptions extends JsonOutputCliOptions {
   value?: boolean | WebCapEvidenceConfig;
 }
 
+export interface UserScriptCliOptions extends JsonOutputCliOptions {
+  action: 'install' | 'list' | 'remove' | 'show';
+  file?: string;
+  id?: string;
+}
+
 export type CliCommand =
   | { name: 'help'; text: string }
   | { name: 'version' }
   | { name: 'mcp' }
   | { name: 'config'; options: ConfigCliOptions }
+  | { name: 'userscript'; options: UserScriptCliOptions }
   | { name: 'session-status'; options: JsonOutputCliOptions }
   | { name: 'script-execute'; options: ScriptExecuteCliOptions }
   | { name: 'browser-screenshot'; options: BrowserScreenshotCliOptions }
@@ -74,6 +81,8 @@ export function parseCliArgs(argv: string[]): CliCommand {
       return parseMcpArgs(args);
     case 'config':
       return parseConfigArgs(args);
+    case 'userscript':
+      return parseUserScriptArgs(args);
     case 'session-status':
       return parseSessionStatusArgs(args);
     case 'script-execute':
@@ -217,6 +226,76 @@ function parseConfigArgs(args: string[]): CliCommand {
   }
 }
 
+function parseUserScriptArgs(args: string[]): CliCommand {
+  const command = createUserScriptParser();
+  const options = parseCommander<{ file?: string; pretty?: boolean }>(command, args);
+  if (options === 'help') {
+    return helpForCommand(command);
+  }
+
+  const [action = 'list', id, ...extraArgs] = command.args;
+  if (extraArgs.length > 0) {
+    throw new Error('userscript accepts at most one id argument.');
+  }
+  switch (action) {
+    case 'list':
+      if (id) {
+        throw new Error('userscript list does not accept an id argument.');
+      }
+      if (options.file) {
+        throw new Error('userscript list does not accept --file.');
+      }
+      return { name: 'userscript', options: { action: 'list', pretty: options.pretty } };
+    case 'install':
+      if (id) {
+        throw new Error('userscript install does not accept an id argument.');
+      }
+      if (!options.file) {
+        throw new Error('userscript install requires --file.');
+      }
+      return {
+        name: 'userscript',
+        options: {
+          action: 'install',
+          file: options.file,
+          pretty: options.pretty,
+        },
+      };
+    case 'remove':
+      if (options.file) {
+        throw new Error('userscript remove does not accept --file.');
+      }
+      if (!id) {
+        throw new Error('userscript remove requires an id.');
+      }
+      return {
+        name: 'userscript',
+        options: {
+          action: 'remove',
+          id,
+          pretty: options.pretty,
+        },
+      };
+    case 'show':
+      if (options.file) {
+        throw new Error('userscript show does not accept --file.');
+      }
+      if (!id) {
+        throw new Error('userscript show requires an id.');
+      }
+      return {
+        name: 'userscript',
+        options: {
+          action: 'show',
+          id,
+          pretty: options.pretty,
+        },
+      };
+    default:
+      throw new Error(`Unknown userscript action: ${action}`);
+  }
+}
+
 function parseScriptExecuteArgs(args: string[]): CliCommand {
   const command = createScriptExecuteParser();
   const options = parseCommander<ScriptExecuteCliOptions>(command, args);
@@ -304,6 +383,8 @@ function createCommandParser(commandName: CliCommandName): Command {
       return createMcpParser();
     case 'config':
       return createConfigParser();
+    case 'userscript':
+      return createUserScriptParser();
     case 'session-status':
       return createSessionStatusParser();
     case 'script-execute':
@@ -322,6 +403,7 @@ function cliCommandNames(): CliCommandName[] {
     'version',
     'mcp',
     'config',
+    'userscript',
     'session-status',
     'script-execute',
     'browser-screenshot',
@@ -349,6 +431,16 @@ function createConfigParser(): Command {
     .argument('[action]')
     .argument('[key]')
     .argument('[value]')
+    .option('--pretty', 'Print formatted JSON output.');
+}
+
+function createUserScriptParser(): Command {
+  return createParser('userscript')
+    .description('Install or list page userscripts synced through the local Web Cap daemon.')
+    .usage('[install|list|show|remove] [id] [options]')
+    .argument('[action]')
+    .argument('[id]')
+    .option('--file <path>', 'JSDoc-style web-cap userscript file to install.')
     .option('--pretty', 'Print formatted JSON output.');
 }
 

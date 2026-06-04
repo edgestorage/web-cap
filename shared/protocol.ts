@@ -1,4 +1,4 @@
-import type { ScriptDefinition } from './script-schema';
+import type { ScriptDefinition, UserScriptDefinition } from './script-schema';
 
 export const DEFAULT_RUNTIME_PORT = 38947;
 export { DEFAULT_EXECUTION_TIMEOUT_MS, MAX_EXECUTION_TIMEOUT_MS } from './script-schema';
@@ -44,6 +44,7 @@ export interface RuntimeHelloPayload {
   extensionVersion: string;
   protocolVersion: string;
   authenticatedSites: string[];
+  userScriptsAvailable?: boolean;
 }
 
 export interface RuntimeHelloAckPayload {
@@ -56,6 +57,7 @@ export interface RuntimeTabSnapshotPayload {
   activeTabId?: number;
   tabs: RuntimeTabSnapshot[];
   authenticatedSites: string[];
+  userScriptsAvailable?: boolean;
 }
 
 export interface ExecuteScriptPayload {
@@ -162,6 +164,10 @@ export interface ScriptRegistrySyncPayload {
   scripts: ScriptDefinition[];
 }
 
+export interface UserScriptRegistrySyncPayload {
+  userscripts: UserScriptDefinition[];
+}
+
 export type RuntimeEnvelope =
   | {
       type: 'hello';
@@ -248,6 +254,13 @@ export type RuntimeEnvelope =
       payload: ScriptRegistrySyncPayload;
     }
   | {
+      type: 'userscript_registry_sync';
+      sessionId: string;
+      requestId?: string;
+      timestamp: string;
+      payload: UserScriptRegistrySyncPayload;
+    }
+  | {
       type: 'error';
       sessionId: string;
       requestId?: string;
@@ -288,6 +301,7 @@ export interface RuntimeSessionSnapshot {
   activeTab?: RuntimeTabSnapshot;
   tabs: RuntimeTabSnapshot[];
   authenticatedSites: string[];
+  userScriptsAvailable?: boolean;
   lastSeenAt?: string;
   runtimes?: RuntimeConnectionSnapshot[];
 }
@@ -316,6 +330,7 @@ export interface RuntimeConnectionSnapshot {
   activeTab?: RuntimeTabSnapshot;
   tabs: RuntimeTabSnapshot[];
   authenticatedSites: string[];
+  userScriptsAvailable?: boolean;
   lastSeenAt?: string;
 }
 

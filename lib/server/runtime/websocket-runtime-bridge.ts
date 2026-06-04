@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { resolve as resolvePath } from 'node:path';
 import { WebSocketServer, type WebSocket } from 'ws';
-import type { ScriptDefinition } from '@shared/script-schema';
+import type { ScriptDefinition, UserScriptDefinition } from '@shared/script-schema';
 import {
   DEFAULT_EXECUTION_TIMEOUT_MS,
   DEFAULT_RUNTIME_PORT,
@@ -92,6 +92,7 @@ export class WebSocketRuntimeBridge implements RuntimeBridge {
   private port: number;
   private scriptHistoryLoader?: () => Promise<ScriptExecutionHistoryEntry[]>;
   private scriptRegistryLoader?: () => Promise<ScriptDefinition[]>;
+  private userScriptRegistryLoader?: () => Promise<UserScriptDefinition[]>;
 
   constructor(private readonly options: WebSocketRuntimeBridgeOptions = {}) {
     this.port = options.port ?? DEFAULT_RUNTIME_PORT;
@@ -139,6 +140,10 @@ export class WebSocketRuntimeBridge implements RuntimeBridge {
 
   setScriptRegistryLoader(loader: () => Promise<ScriptDefinition[]>): void {
     this.scriptRegistryLoader = loader;
+  }
+
+  setUserScriptRegistryLoader(loader: () => Promise<UserScriptDefinition[]>): void {
+    this.userScriptRegistryLoader = loader;
   }
 
   async close(): Promise<void> {
@@ -189,6 +194,7 @@ export class WebSocketRuntimeBridge implements RuntimeBridge {
       ...runtime.snapshot,
       tabs: [...runtime.snapshot.tabs],
       authenticatedSites: [...runtime.snapshot.authenticatedSites],
+      userScriptsAvailable: runtime.snapshot.userScriptsAvailable,
     }));
     const activeRuntime =
       (this.activeSessionId ? this.runtimes.get(this.activeSessionId)?.snapshot : undefined) ??
@@ -202,6 +208,7 @@ export class WebSocketRuntimeBridge implements RuntimeBridge {
       activeTab: activeRuntime?.activeTab,
       tabs: activeRuntime ? [...activeRuntime.tabs] : [],
       authenticatedSites: activeRuntime ? [...activeRuntime.authenticatedSites] : [],
+      userScriptsAvailable: activeRuntime?.userScriptsAvailable,
       lastSeenAt: activeRuntime?.lastSeenAt,
       runtimes,
     };
@@ -393,6 +400,21 @@ export class WebSocketRuntimeBridge implements RuntimeBridge {
           'script_registry_sync',
           {
             scripts,
+          },
+          { sessionId: runtime.snapshot.sessionId },
+        ),
+      );
+    }
+  }
+
+  async syncUserScriptRegistry(userscripts: UserScriptDefinition[]): Promise<void> {
+    for (const runtime of this.runtimes.values()) {
+      this.sendEnvelope(
+        runtime,
+        createRuntimeEnvelope(
+          'userscript_registry_sync',
+          {
+            userscripts,
           },
           { sessionId: runtime.snapshot.sessionId },
         ),
@@ -805,6 +827,7 @@ export class WebSocketRuntimeBridge implements RuntimeBridge {
         browserName: payload.browserName,
         extensionVersion: payload.extensionVersion,
         authenticatedSites: payload.authenticatedSites,
+        userScriptsAvailable: payload.userScriptsAvailable === true,
         tabs: [],
         lastSeenAt: new Date().toISOString(),
       },
@@ -860,6 +883,25 @@ export class WebSocketRuntimeBridge implements RuntimeBridge {
         );
       } catch (error) {
         console.error('WEB_CAP failed to sync script registry to runtime:', error);
+      }
+    }
+
+    if (this.userScriptRegistryLoader) {
+      try {
+        const runtime = this.runtimes.get(sessionId);
+        const userscripts = await this.userScriptRegistryLoader();
+        this.sendEnvelope(
+          runtime,
+          createRuntimeEnvelope(
+            'userscript_registry_sync',
+            {
+              userscripts,
+            },
+            { sessionId },
+          ),
+        );
+      } catch (error) {
+        console.error('WEB_CAP failed to sync userscript registry to runtime:', error);
       }
     }
   }

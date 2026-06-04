@@ -40,6 +40,13 @@ export const rpcInputSchemas = {
     limit: z.number().int().optional(),
   }),
   scriptRegistryList: z.object({}),
+  userScriptInstall: z.object({
+    filePath: z.string().min(1),
+  }),
+  userScriptList: z.object({}),
+  userScriptRemove: z.object({
+    id: z.string().min(1),
+  }),
   browserWaitEvents: browserCommandRequestSchemas.wait_events,
   sessionStatus: toolInputSchemas.session_status,
   browserScreenshot: browserCommandRequestSchemas.browser_screenshot,
@@ -183,6 +190,7 @@ export async function executeCoreTool(
         lastActiveTab: status.activeTab,
         tabs: status.tabs,
         authenticatedSites: status.authenticatedSites,
+        userScriptsAvailable: status.userScriptsAvailable,
         lastSeenAt: status.lastSeenAt,
         runtimes: status.runtimes ?? [],
       };

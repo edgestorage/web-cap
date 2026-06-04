@@ -1321,6 +1321,15 @@ describe('WebCapAgentApp', () => {
       async scriptRegistryList() {
         return [];
       },
+      async userScriptInstall() {
+        throw new Error('not used');
+      },
+      async userScriptList() {
+        return [];
+      },
+      async userScriptRemove() {
+        throw new Error('not used');
+      },
       async browserScreenshot() {
         throw new Error('not used');
       },

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { WebSocket, WebSocketServer } from 'ws';
 import type {
   ScriptDefinition,
+  UserScriptDefinition,
 } from '@shared/script-schema';
 import type {
   BrowserCommandResult,
@@ -19,6 +20,8 @@ import { delay, formatError, startDetachedDaemon } from '../daemon-bootstrap';
 import type {
   ExecuteScriptRequest,
   ExecuteScriptResult,
+  InstallUserScriptRequest,
+  RemoveUserScriptRequest,
   WebCapAgentService,
 } from './agent/contracts';
 import { RuntimeBridgeError } from './runtime/runtime-bridge';
@@ -235,6 +238,16 @@ export class WebCapRpcServer {
       }
       case 'scriptRegistryList':
         return await this.app.scriptRegistryList();
+      case 'userScriptInstall': {
+        const params = parseRpcInput(request.method, request.params);
+        return await this.app.userScriptInstall(params);
+      }
+      case 'userScriptList':
+        return await this.app.userScriptList();
+      case 'userScriptRemove': {
+        const params = parseRpcInput(request.method, request.params);
+        return await this.app.userScriptRemove(params);
+      }
     }
   }
 }
@@ -314,6 +327,24 @@ export class WebCapRpcClient {
 
   async scriptRegistryList(): Promise<ScriptDefinition[]> {
     return (await this.request('scriptRegistryList')) as ScriptDefinition[];
+  }
+
+  async userScriptInstall(request: InstallUserScriptRequest): Promise<UserScriptDefinition> {
+    return (await this.request(
+      'userScriptInstall',
+      request as unknown as Record<string, unknown>,
+    )) as UserScriptDefinition;
+  }
+
+  async userScriptList(): Promise<UserScriptDefinition[]> {
+    return (await this.request('userScriptList')) as UserScriptDefinition[];
+  }
+
+  async userScriptRemove(request: RemoveUserScriptRequest): Promise<UserScriptDefinition> {
+    return (await this.request(
+      'userScriptRemove',
+      request as unknown as Record<string, unknown>,
+    )) as UserScriptDefinition;
   }
 
   private async request(

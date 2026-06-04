@@ -1,5 +1,6 @@
 import {
   type ScriptDefinition,
+  type UserScriptDefinition,
 } from '@shared/script-schema';
 import type {
   BrowserCommandResult,
@@ -12,6 +13,8 @@ import { builtinScripts, builtinScriptRecords } from './scripts/builtin-scripts'
 import type {
   ExecuteScriptRequest,
   ExecuteScriptResult,
+  InstallUserScriptRequest,
+  RemoveUserScriptRequest,
   WebCapAgentService,
 } from './agent/contracts';
 import type { ScriptProvider } from './providers/script-provider';
@@ -25,9 +28,14 @@ import { resolveWebCapStateDir } from './state-dir';
 import { BrowserSessionService } from './browser/session-service';
 import { ScriptExecutionService } from './scripts/execution-service';
 import { ScriptRegistryService } from './scripts/registry-service';
+import {
+  FileUserScriptProvider,
+  type UserScriptProvider,
+} from './userscripts/file-userscript-provider';
 
 export interface WebCapAppOptions {
   scriptProvider?: ScriptProvider;
+  userScriptProvider?: UserScriptProvider;
   runtimeBridge: RuntimeBridge;
   scriptExecutionHistory?: ScriptExecutionHistory;
 }
@@ -41,6 +49,7 @@ export type {
 
 export class WebCapAgentApp implements WebCapAgentService {
   public readonly scriptProvider: ScriptProvider;
+  public readonly userScriptProvider: UserScriptProvider;
   public readonly runtimeBridge: RuntimeBridge;
   public readonly scriptExecutionHistory: ScriptExecutionHistory;
   private readonly browserSessionService: BrowserSessionService;
@@ -50,6 +59,8 @@ export class WebCapAgentApp implements WebCapAgentService {
   constructor(options: WebCapAppOptions) {
     this.scriptProvider =
       options.scriptProvider ?? createDefaultScriptProvider(process.env);
+    this.userScriptProvider =
+      options.userScriptProvider ?? createDefaultUserScriptProvider(process.env);
     this.runtimeBridge = options.runtimeBridge;
     this.scriptExecutionHistory =
       options.scriptExecutionHistory ?? createDefaultScriptExecutionHistory(process.env);
@@ -93,6 +104,22 @@ export class WebCapAgentApp implements WebCapAgentService {
     return await this.scriptRegistryService.buildRegisteredScriptRegistry();
   }
 
+  async userScriptInstall(request: InstallUserScriptRequest): Promise<UserScriptDefinition> {
+    const definition = await this.userScriptProvider.install(request);
+    await this.syncUserScriptRegistry();
+    return definition;
+  }
+
+  async userScriptList(): Promise<UserScriptDefinition[]> {
+    return await this.userScriptProvider.list();
+  }
+
+  async userScriptRemove(request: RemoveUserScriptRequest): Promise<UserScriptDefinition> {
+    const definition = await this.userScriptProvider.remove(request.id);
+    await this.syncUserScriptRegistry();
+    return definition;
+  }
+
   async browserScreenshot(input: BrowserScreenshotInput): Promise<BrowserScreenshotResult> {
     return await this.browserSessionService.screenshot(input);
   }
@@ -127,6 +154,14 @@ export class WebCapAgentApp implements WebCapAgentService {
 
     await this.runtimeBridge.syncScriptRegistry(await this.scriptRegistryList());
   }
+
+  private async syncUserScriptRegistry(): Promise<void> {
+    if (typeof this.runtimeBridge.syncUserScriptRegistry !== 'function') {
+      return;
+    }
+
+    await this.runtimeBridge.syncUserScriptRegistry(await this.userScriptList());
+  }
 }
 
 interface ScriptProviderEnvironment {
@@ -151,6 +186,12 @@ export function createDefaultScriptProvider(
     providers: [builtinProvider, cloudProvider, fileProvider],
     writableProviders: [cloudProvider, fileProvider],
   });
+}
+
+export function createDefaultUserScriptProvider(
+  env: ScriptProviderEnvironment = process.env,
+): UserScriptProvider {
+  return new FileUserScriptProvider(resolveWebCapStateDir(env));
 }
 
 export function createDefaultScriptExecutionHistory(

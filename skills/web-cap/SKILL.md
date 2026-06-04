@@ -83,7 +83,7 @@ For reusable automation, write a normal script file and call it whenever needed:
  * @description Read a compact summary of the current page.
  * @param {object} input
  * @param {number} [input.limit] Optional maximum number of links/items to return.
- * @webCapPages https://example.com/articles/:articleId, https://example.com/docs/*
+ * @match https://example.com/articles/:articleId, https://example.com/docs/*
  */
 export default async function (input) {
   const heading = await page.locator("h1").first().textContent().catch(() => "");
@@ -103,6 +103,28 @@ export default async function (input) {
     links
   };
 }
+```
+
+For page lifecycle userscripts that should run automatically when matching pages load, use
+`web-cap userscript` metadata and install them with `userscript install`:
+
+```javascript
+/**
+ * web-cap userscript
+ *
+ * @name Foo
+ * @version 1.0.0
+ * @match https://example.com/*
+ * @runAt document-idle
+ */
+console.log("foo");
+```
+
+```bash
+web-cap userscript install --file ./foo.js
+web-cap userscript list
+web-cap userscript show userscript.foo
+web-cap userscript remove userscript.foo
 ```
 
 ```bash

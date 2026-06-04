@@ -11,6 +11,9 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: 1.17.5
         version: 1.17.5
+      '@webext-core/match-patterns':
+        specifier: 1.0.3
+        version: 1.0.3
       ajv:
         specifier: ^8.20.0
         version: 8.20.0

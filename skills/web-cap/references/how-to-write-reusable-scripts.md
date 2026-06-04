@@ -30,7 +30,7 @@ Each saved script must start with a JSDoc-style metadata block:
  * @description Read a compact summary of the current page.
  * @param {object} input
  * @param {number} [input.limit] Optional maximum number of links/items to return.
- * @webCapPages https://example.com/articles/:articleId, https://example.com/docs/*
+ * @match https://example.com/articles/:articleId, https://example.com/docs/*
  */
 export default async function (input) {
   return {
@@ -48,9 +48,9 @@ Header requirements:
 - Use `@description` for the reusable capability or workflow.
 - Use `@param` for the input object and important input fields.
 - Use `@returns` when the returned structured result needs extra explanation.
-- Use `@webCapPages` to describe where the script can run using URL/page patterns that future agents can match against `location.href`.
+- Use `@match` to describe where the script can run using URL/page patterns that future agents can match against `location.href`.
 
-`@webCapPages` pattern rules:
+`@match` pattern rules:
 
 - Use full URL patterns with origin and path, such as `https://github.com/:owner/:repo/issues`.
 - Use `:name` path parameters for variable path segments.
@@ -82,4 +82,30 @@ Execution example:
 
 ```bash
 web-cap script-execute --tab-id <tab-id> --script-file .web-cap/example.com/read-page-summary.js --input '{"limit":10}'
+```
+
+## Page Userscripts
+
+Use `web-cap userscript` files for scripts that should run automatically when
+matching pages load:
+
+```javascript
+/**
+ * web-cap userscript
+ *
+ * @name Foo
+ * @version 1.0.0
+ * @match https://example.com/*
+ * @runAt document-idle
+ */
+console.log("foo");
+```
+
+Install and list page userscripts with:
+
+```bash
+web-cap userscript install --file ./foo.js
+web-cap userscript list
+web-cap userscript show userscript.foo
+web-cap userscript remove userscript.foo
 ```

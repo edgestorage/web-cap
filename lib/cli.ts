@@ -72,6 +72,13 @@ export async function runCli(
         return 0;
       }
 
+      if (command.name === 'userscript') {
+        const result = await handleUserScriptCommand(app, command.options);
+        writeJson(io, result, command.options);
+        await writeUserScriptAvailabilityHint(app, io);
+        return 0;
+      }
+
       if (command.name !== 'wait-events') {
         throw new Error(`Unsupported command: ${command.name}`);
       }
@@ -87,6 +94,54 @@ export async function runCli(
   } catch (error) {
     io.stderr.write(`${formatCliError(error)}\n`);
     return 1;
+  }
+}
+
+async function handleUserScriptCommand(
+  app: WebCapAgentService,
+  options: Extract<CliCommand, { name: 'userscript' }>['options'],
+): Promise<unknown> {
+  switch (options.action) {
+    case 'install':
+      return await app.userScriptInstall({ filePath: options.file! });
+    case 'remove':
+      return await app.userScriptRemove({ id: options.id! });
+    case 'show': {
+      const script = (await app.userScriptList()).find((candidate) => candidate.id === options.id);
+      if (!script) {
+        throw new Error(`User script ${options.id} was not found.`);
+      }
+      return script;
+    }
+    case 'list':
+      return { userscripts: await app.userScriptList() };
+  }
+}
+
+async function writeUserScriptAvailabilityHint(
+  app: WebCapAgentService,
+  io: CliIo,
+): Promise<void> {
+  try {
+    const status = await app.sessionStatus();
+    const runtimes = status.runtimes ?? [];
+    const userScriptsAvailable =
+      status.userScriptsAvailable === true ||
+      runtimes.some((runtime) => runtime.userScriptsAvailable === true);
+    if (userScriptsAvailable) {
+      return;
+    }
+
+    const reason = status.connected
+      ? 'The connected browser runtime has not enabled chrome.userScripts.'
+      : 'No browser runtime is connected, so installed userscripts cannot be registered yet.';
+    io.stderr.write(
+      `WEB_CAP userscript notice: ${reason} Enable the extension's user scripts support and reconnect the runtime.\n`,
+    );
+  } catch {
+    io.stderr.write(
+      'WEB_CAP userscript notice: Could not verify browser user scripts support. Enable the extension user scripts support before expecting automatic injection.\n',
+    );
   }
 }
 
@@ -209,6 +264,7 @@ function jsonOutputOptionsForCommand(command: CliCommand): JsonOutputCliOptions 
     case 'browser-screenshot':
     case 'browser-new-tab':
     case 'config':
+    case 'userscript':
       return command.options;
     default:
       return {};

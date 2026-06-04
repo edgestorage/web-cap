@@ -1,19 +1,25 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import type { ScriptExecutionHistoryEntry } from '@shared/protocol';
-import type { ScriptDefinition, ScriptType } from '@shared/script-schema';
+import type { ScriptDefinition, ScriptType, UserScriptDefinition } from '@shared/script-schema';
 
 const SCRIPT_HISTORY_STORAGE_KEY = 'scriptExecutionHistory';
 const SCRIPT_HISTORY_UPDATED_AT_STORAGE_KEY = 'scriptExecutionHistoryUpdatedAt';
 const SCRIPT_REGISTRY_STORAGE_KEY = 'scriptRegistry';
 const SCRIPT_REGISTRY_UPDATED_AT_STORAGE_KEY = 'scriptRegistryUpdatedAt';
+const USERSCRIPT_REGISTRY_STORAGE_KEY = 'userScriptRegistry';
+const USERSCRIPT_REGISTRY_UPDATED_AT_STORAGE_KEY = 'userScriptRegistryUpdatedAt';
+const USERSCRIPT_AVAILABLE_STORAGE_KEY = 'userScriptsAvailable';
 
 const entries = ref<ScriptExecutionHistoryEntry[]>([]);
 const scripts = ref<ScriptDefinition[]>([]);
+const userScripts = ref<UserScriptDefinition[]>([]);
 const updatedAt = ref('');
 const registryUpdatedAt = ref('');
+const userScriptUpdatedAt = ref('');
+const userScriptsAvailable = ref(false);
 const isLoading = ref(true);
-const activeView = ref<'registry' | 'history'>('registry');
+const activeView = ref<'registry' | 'userscripts' | 'history'>('registry');
 const scriptTypeFilter = ref<'all' | ScriptType>('all');
 const expandedScripts = ref<string[]>([]);
 const dialogTitle = ref('');
@@ -42,6 +48,12 @@ const registrySummary = computed(() => {
   return { builtIn, registered, total: registeredScripts.value.length };
 });
 
+const userScriptSummary = computed(() => {
+  const active = userScripts.value.filter((script) => script.status === 'active').length;
+  const disabled = userScripts.value.filter((script) => script.status === 'disabled').length;
+  return { active, disabled, total: userScripts.value.length };
+});
+
 const lastUpdatedLabel = computed(() => {
   if (!updatedAt.value) {
     return 'Waiting for the first sync from MCP';
@@ -58,6 +70,15 @@ const registryUpdatedLabel = computed(() => {
 
   const date = new Date(registryUpdatedAt.value);
   return Number.isNaN(date.getTime()) ? registryUpdatedAt.value : date.toLocaleString();
+});
+
+const userScriptUpdatedLabel = computed(() => {
+  if (!userScriptUpdatedAt.value) {
+    return 'Waiting for userscript sync from MCP';
+  }
+
+  const date = new Date(userScriptUpdatedAt.value);
+  return Number.isNaN(date.getTime()) ? userScriptUpdatedAt.value : date.toLocaleString();
 });
 
 function formatJson(value: Record<string, unknown> | undefined): string {
@@ -121,6 +142,9 @@ async function loadHistory(): Promise<void> {
       SCRIPT_HISTORY_UPDATED_AT_STORAGE_KEY,
       SCRIPT_REGISTRY_STORAGE_KEY,
       SCRIPT_REGISTRY_UPDATED_AT_STORAGE_KEY,
+      USERSCRIPT_REGISTRY_STORAGE_KEY,
+      USERSCRIPT_REGISTRY_UPDATED_AT_STORAGE_KEY,
+      USERSCRIPT_AVAILABLE_STORAGE_KEY,
     ]);
 
     entries.value = Array.isArray(stored[SCRIPT_HISTORY_STORAGE_KEY])
@@ -128,6 +152,9 @@ async function loadHistory(): Promise<void> {
       : [];
     scripts.value = Array.isArray(stored[SCRIPT_REGISTRY_STORAGE_KEY])
       ? (stored[SCRIPT_REGISTRY_STORAGE_KEY] as ScriptDefinition[])
+      : [];
+    userScripts.value = Array.isArray(stored[USERSCRIPT_REGISTRY_STORAGE_KEY])
+      ? (stored[USERSCRIPT_REGISTRY_STORAGE_KEY] as UserScriptDefinition[])
       : [];
     updatedAt.value =
       typeof stored[SCRIPT_HISTORY_UPDATED_AT_STORAGE_KEY] === 'string'
@@ -137,6 +164,11 @@ async function loadHistory(): Promise<void> {
       typeof stored[SCRIPT_REGISTRY_UPDATED_AT_STORAGE_KEY] === 'string'
         ? stored[SCRIPT_REGISTRY_UPDATED_AT_STORAGE_KEY]
         : '';
+    userScriptUpdatedAt.value =
+      typeof stored[USERSCRIPT_REGISTRY_UPDATED_AT_STORAGE_KEY] === 'string'
+        ? stored[USERSCRIPT_REGISTRY_UPDATED_AT_STORAGE_KEY]
+        : '';
+    userScriptsAvailable.value = stored[USERSCRIPT_AVAILABLE_STORAGE_KEY] === true;
   } finally {
     isLoading.value = false;
   }
@@ -179,6 +211,26 @@ function handleStorageChanged(
         ? registryUpdatedAtChange.newValue
         : '';
   }
+
+  const userScriptChange = changes[USERSCRIPT_REGISTRY_STORAGE_KEY];
+  if (userScriptChange) {
+    userScripts.value = Array.isArray(userScriptChange.newValue)
+      ? (userScriptChange.newValue as UserScriptDefinition[])
+      : [];
+  }
+
+  const userScriptUpdatedAtChange = changes[USERSCRIPT_REGISTRY_UPDATED_AT_STORAGE_KEY];
+  if (userScriptUpdatedAtChange) {
+    userScriptUpdatedAt.value =
+      typeof userScriptUpdatedAtChange.newValue === 'string'
+        ? userScriptUpdatedAtChange.newValue
+        : '';
+  }
+
+  const userScriptsAvailableChange = changes[USERSCRIPT_AVAILABLE_STORAGE_KEY];
+  if (userScriptsAvailableChange) {
+    userScriptsAvailable.value = userScriptsAvailableChange.newValue === true;
+  }
 }
 
 onMounted(async () => {
@@ -209,6 +261,13 @@ onBeforeUnmount(() => {
       </button>
       <button
         type="button"
+        :class="{ active: activeView === 'userscripts' }"
+        @click="activeView = 'userscripts'"
+      >
+        Userscripts
+      </button>
+      <button
+        type="button"
         :class="{ active: activeView === 'history' }"
         @click="activeView = 'history'"
       >
@@ -231,6 +290,21 @@ onBeforeUnmount(() => {
       </article>
     </section>
 
+    <section v-else-if="activeView === 'userscripts'" class="stats">
+      <article class="stat-card">
+        <span class="stat-label">Active</span>
+        <strong>{{ userScriptSummary.active }}</strong>
+      </article>
+      <article class="stat-card">
+        <span class="stat-label">Disabled</span>
+        <strong>{{ userScriptSummary.disabled }}</strong>
+      </article>
+      <article class="stat-card">
+        <span class="stat-label">Total</span>
+        <strong>{{ userScriptSummary.total }}</strong>
+      </article>
+    </section>
+
     <section v-else class="stats">
       <article class="stat-card">
         <span class="stat-label">Succeeded</span>
@@ -249,7 +323,11 @@ onBeforeUnmount(() => {
     <section class="meta">
       <span class="meta-label">Last sync</span>
       <span class="meta-value">{{
-        activeView === 'registry' ? registryUpdatedLabel : lastUpdatedLabel
+        activeView === 'registry'
+          ? registryUpdatedLabel
+          : activeView === 'userscripts'
+            ? userScriptUpdatedLabel
+            : lastUpdatedLabel
       }}</span>
     </section>
 
@@ -307,6 +385,59 @@ onBeforeUnmount(() => {
               type="button"
               class="ghost-button"
               @click="openDialog(`${script.id} · Code`, script.script.code)"
+            >
+              Code
+            </button>
+          </div>
+        </article>
+      </section>
+    </section>
+
+    <section v-else-if="activeView === 'userscripts'" class="registry-panel">
+      <section v-if="!userScriptsAvailable" class="notice-card">
+        <p class="notice-title">User scripts support is not enabled.</p>
+        <p class="hint">Enable the extension's user scripts support and reconnect the runtime.</p>
+      </section>
+
+      <section v-if="userScripts.length === 0" class="empty-state">
+        <p>No userscripts installed.</p>
+        <p class="hint">Install one with the Web Cap CLI.</p>
+      </section>
+
+      <section v-else class="registry-list">
+        <article v-for="script in userScripts" :key="`${script.id}@${script.version}`" class="script-card">
+          <header class="script-card-header">
+            <div>
+              <p class="script-name">{{ script.name }}</p>
+              <p class="script-id">{{ script.id }}@{{ script.version }}</p>
+            </div>
+            <div class="pill-stack">
+              <span class="status-pill">{{ script.runAt }}</span>
+              <span class="status-pill" :data-status="script.status">{{ script.status }}</span>
+            </div>
+          </header>
+
+          <div class="script-meta-row">
+            <span>{{ script.matches.length }} match{{ script.matches.length === 1 ? '' : 'es' }}</span>
+            <span>{{ script.sourcePath || 'Cached userscript' }}</span>
+          </div>
+
+          <div class="tag-row">
+            <span v-for="match in script.matches" :key="match">{{ match }}</span>
+          </div>
+
+          <div class="script-actions">
+            <button
+              type="button"
+              class="ghost-button"
+              @click="openDialog(`${script.id} · Matches`, script.matches.join('\n'))"
+            >
+              Matches
+            </button>
+            <button
+              type="button"
+              class="ghost-button"
+              @click="openDialog(`${script.id} · Code`, script.code)"
             >
               Code
             </button>
@@ -447,7 +578,7 @@ h1 {
 
 .view-switch {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
   margin-bottom: 12px;
 }
@@ -481,6 +612,7 @@ h1 {
 .meta,
 .history-card,
 .script-card,
+.notice-card,
 .empty-state {
   border: 1px solid rgba(109, 88, 57, 0.16);
   border-radius: 8px;
@@ -529,6 +661,17 @@ h1 {
   padding: 18px;
   text-align: center;
   color: #5f5546;
+}
+
+.notice-card {
+  padding: 13px;
+  background: #fff7dc;
+  color: #6c4b09;
+}
+
+.notice-title {
+  margin: 0;
+  font-weight: 700;
 }
 
 .hint {
@@ -673,6 +816,11 @@ pre {
   color: #695844;
 }
 
+.status-pill[data-status='disabled'] {
+  background: #f1e6e3;
+  color: #7b4238;
+}
+
 .script-meta-row {
   display: flex;
   justify-content: space-between;
@@ -680,6 +828,11 @@ pre {
   margin-top: 10px;
   color: #6f604f;
   font-size: 12px;
+}
+
+.script-meta-row span {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .tag-row {

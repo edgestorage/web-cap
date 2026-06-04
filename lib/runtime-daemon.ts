@@ -106,6 +106,7 @@ async function main(): Promise<void> {
   const app = new WebCapAgentApp({ runtimeBridge });
   runtimeBridge.setScriptHistoryLoader(() => app.scriptHistoryList());
   runtimeBridge.setScriptRegistryLoader(() => app.scriptRegistryList());
+  runtimeBridge.setUserScriptRegistryLoader(() => app.userScriptList());
   const rpcServer = new WebCapRpcServer(app, undefined, {
     buildId,
     onClientCountChanged: (clientCount) => {

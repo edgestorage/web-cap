@@ -61,6 +61,30 @@ export const scriptDefinitionSchema = z.object({
 });
 export type ScriptDefinition = z.infer<typeof scriptDefinitionSchema>;
 
+export const userScriptRunAtSchema = z.enum([
+  'document-start',
+  'document-end',
+  'document-idle',
+]);
+export type UserScriptRunAt = z.infer<typeof userScriptRunAtSchema>;
+
+export const userScriptStatusSchema = z.enum(['active', 'disabled']);
+export type UserScriptStatus = z.infer<typeof userScriptStatusSchema>;
+
+export const userScriptDefinitionSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  version: z.string().min(1).default('1.0.0'),
+  status: userScriptStatusSchema.default('active'),
+  matches: z.array(z.string().min(1)).min(1),
+  runAt: userScriptRunAtSchema.default('document-idle'),
+  code: z.string().min(1),
+  sourcePath: z.string().optional(),
+  installedAt: z.string(),
+  updatedAt: z.string(),
+});
+export type UserScriptDefinition = z.infer<typeof userScriptDefinitionSchema>;
+
 export const cloudScriptRecordSchema = z.object({
   id: z.string().min(1),
   scriptDefinition: scriptDefinitionSchema,

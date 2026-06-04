@@ -1,4 +1,4 @@
-import type { ScriptDefinition } from '@shared/script-schema';
+import type { ScriptDefinition, UserScriptDefinition } from '@shared/script-schema';
 import type {
   BrowserCommandName,
   BrowserCommandResult,
@@ -30,6 +30,7 @@ export interface RuntimeBridge {
   ): Promise<BrowserCommandResult>;
   syncScriptHistory?(entries: ScriptExecutionHistoryEntry[]): Promise<void>;
   syncScriptRegistry?(scripts: ScriptDefinition[]): Promise<void>;
+  syncUserScriptRegistry?(userscripts: UserScriptDefinition[]): Promise<void>;
 }
 
 export class RuntimeBridgeError extends Error {
