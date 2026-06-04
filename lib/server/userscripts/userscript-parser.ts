@@ -3,6 +3,7 @@ import {
   userScriptDefinitionSchema,
   type UserScriptDefinition,
   type UserScriptRunAt,
+  type UserScriptStatus,
 } from '@shared/script-schema';
 
 const DEFAULT_USER_SCRIPT_VERSION = '1.0.0';
@@ -19,6 +20,7 @@ interface ParsedUserScriptHeader {
   version: string;
   matches: string[];
   runAt: UserScriptRunAt;
+  status: UserScriptStatus;
 }
 
 export interface ParseUserScriptOptions {
@@ -38,7 +40,7 @@ export function parseUserScriptDefinition(
     id: options.id ?? buildUserScriptId(header.name),
     name: header.name,
     version: header.version,
-    status: 'active',
+    status: header.status,
     matches: header.matches,
     runAt: header.runAt,
     code: source.trimEnd(),
@@ -90,11 +92,17 @@ export function parseUserScriptHeader(source: string): ParsedUserScriptHeader {
     );
   }
 
+  const status = readSingleField(fields, 'status') ?? 'active';
+  if (status !== 'active' && status !== 'disabled') {
+    throw new Error(`Invalid @status "${status}". Expected active or disabled.`);
+  }
+
   return {
     name,
     version: readSingleField(fields, 'version') || DEFAULT_USER_SCRIPT_VERSION,
     matches,
     runAt: runAt as UserScriptRunAt,
+    status,
   };
 }
 

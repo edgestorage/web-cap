@@ -15,6 +15,7 @@ import type {
   ExecuteScriptResult,
   InstallUserScriptRequest,
   RemoveUserScriptRequest,
+  UpdateUserScriptStatusRequest,
   WebCapAgentService,
 } from './agent/contracts';
 import type { ScriptProvider } from './providers/script-provider';
@@ -106,12 +107,24 @@ export class WebCapAgentApp implements WebCapAgentService {
 
   async userScriptInstall(request: InstallUserScriptRequest): Promise<UserScriptDefinition> {
     const definition = await this.userScriptProvider.install(request);
-    await this.syncUserScriptRegistry();
+    await this.syncUserScriptRegistry(request.applyNow ? [definition.id] : undefined);
     return definition;
   }
 
   async userScriptList(): Promise<UserScriptDefinition[]> {
     return await this.userScriptProvider.list();
+  }
+
+  async userScriptEnable(request: UpdateUserScriptStatusRequest): Promise<UserScriptDefinition> {
+    const definition = await this.userScriptProvider.setStatus(request.id, 'active');
+    await this.syncUserScriptRegistry(request.applyNow ? [definition.id] : undefined);
+    return definition;
+  }
+
+  async userScriptDisable(request: UpdateUserScriptStatusRequest): Promise<UserScriptDefinition> {
+    const definition = await this.userScriptProvider.setStatus(request.id, 'disabled');
+    await this.syncUserScriptRegistry();
+    return definition;
   }
 
   async userScriptRemove(request: RemoveUserScriptRequest): Promise<UserScriptDefinition> {
@@ -155,12 +168,14 @@ export class WebCapAgentApp implements WebCapAgentService {
     await this.runtimeBridge.syncScriptRegistry(await this.scriptRegistryList());
   }
 
-  private async syncUserScriptRegistry(): Promise<void> {
+  private async syncUserScriptRegistry(applyNowUserScriptIds?: string[]): Promise<void> {
     if (typeof this.runtimeBridge.syncUserScriptRegistry !== 'function') {
       return;
     }
 
-    await this.runtimeBridge.syncUserScriptRegistry(await this.userScriptList());
+    await this.runtimeBridge.syncUserScriptRegistry(await this.userScriptList(), {
+      applyNowUserScriptIds,
+    });
   }
 }
 

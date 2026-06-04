@@ -43,9 +43,10 @@ export interface ConfigCliOptions extends JsonOutputCliOptions {
 }
 
 export interface UserScriptCliOptions extends JsonOutputCliOptions {
-  action: 'install' | 'list' | 'remove' | 'show';
+  action: 'install' | 'list' | 'remove' | 'show' | 'enable' | 'disable';
   file?: string;
   id?: string;
+  applyNow?: boolean;
 }
 
 export type CliCommand =
@@ -228,7 +229,10 @@ function parseConfigArgs(args: string[]): CliCommand {
 
 function parseUserScriptArgs(args: string[]): CliCommand {
   const command = createUserScriptParser();
-  const options = parseCommander<{ file?: string; pretty?: boolean }>(command, args);
+  const options = parseCommander<{ file?: string; pretty?: boolean; applyNow?: boolean }>(
+    command,
+    args,
+  );
   if (options === 'help') {
     return helpForCommand(command);
   }
@@ -245,6 +249,9 @@ function parseUserScriptArgs(args: string[]): CliCommand {
       if (options.file) {
         throw new Error('userscript list does not accept --file.');
       }
+      if (options.applyNow) {
+        throw new Error('userscript list does not accept --apply-now.');
+      }
       return { name: 'userscript', options: { action: 'list', pretty: options.pretty } };
     case 'install':
       if (id) {
@@ -258,10 +265,48 @@ function parseUserScriptArgs(args: string[]): CliCommand {
         options: {
           action: 'install',
           file: options.file,
+          applyNow: options.applyNow,
+          pretty: options.pretty,
+        },
+      };
+    case 'enable':
+      if (options.file) {
+        throw new Error(`userscript ${action} does not accept --file.`);
+      }
+      if (!id) {
+        throw new Error(`userscript ${action} requires an id.`);
+      }
+      return {
+        name: 'userscript',
+        options: {
+          action,
+          id,
+          applyNow: options.applyNow,
+          pretty: options.pretty,
+        },
+      };
+    case 'disable':
+      if (options.file) {
+        throw new Error('userscript disable does not accept --file.');
+      }
+      if (options.applyNow) {
+        throw new Error('userscript disable does not accept --apply-now.');
+      }
+      if (!id) {
+        throw new Error('userscript disable requires an id.');
+      }
+      return {
+        name: 'userscript',
+        options: {
+          action,
+          id,
           pretty: options.pretty,
         },
       };
     case 'remove':
+      if (options.applyNow) {
+        throw new Error('userscript remove does not accept --apply-now.');
+      }
       if (options.file) {
         throw new Error('userscript remove does not accept --file.');
       }
@@ -277,6 +322,9 @@ function parseUserScriptArgs(args: string[]): CliCommand {
         },
       };
     case 'show':
+      if (options.applyNow) {
+        throw new Error('userscript show does not accept --apply-now.');
+      }
       if (options.file) {
         throw new Error('userscript show does not accept --file.');
       }
@@ -436,11 +484,14 @@ function createConfigParser(): Command {
 
 function createUserScriptParser(): Command {
   return createParser('userscript')
-    .description('Install or list page userscripts synced through the local Web Cap daemon.')
-    .usage('[install|list|show|remove] [id] [options]')
+    .description(
+      'Install, inspect, and remove page userscripts that automatically run on matching browser pages.',
+    )
+    .usage('[install|list|show|enable|disable|remove] [id] [options]')
     .argument('[action]')
     .argument('[id]')
     .option('--file <path>', 'JSDoc-style web-cap userscript file to install.')
+    .option('--apply-now', 'Immediately run the installed or enabled userscript on matching open tabs.')
     .option('--pretty', 'Print formatted JSON output.');
 }
 

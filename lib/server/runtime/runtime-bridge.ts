@@ -14,6 +14,10 @@ export interface BrowserCommandOptions {
   onEvent?: (event: Record<string, unknown>) => void;
 }
 
+export interface UserScriptSyncOptions {
+  applyNowUserScriptIds?: string[];
+}
+
 export interface RuntimeBridge {
   start(): Promise<void>;
   close(): Promise<void>;
@@ -30,7 +34,10 @@ export interface RuntimeBridge {
   ): Promise<BrowserCommandResult>;
   syncScriptHistory?(entries: ScriptExecutionHistoryEntry[]): Promise<void>;
   syncScriptRegistry?(scripts: ScriptDefinition[]): Promise<void>;
-  syncUserScriptRegistry?(userscripts: UserScriptDefinition[]): Promise<void>;
+  syncUserScriptRegistry?(
+    userscripts: UserScriptDefinition[],
+    options?: UserScriptSyncOptions,
+  ): Promise<void>;
 }
 
 export class RuntimeBridgeError extends Error {

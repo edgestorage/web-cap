@@ -1,4 +1,5 @@
 import type { ScriptDefinition, UserScriptDefinition } from '@shared/script-schema';
+import { MatchPattern } from '@webext-core/match-patterns';
 import {
   DEFAULT_RUNTIME_PORT,
   RUNTIME_HEARTBEAT_INTERVAL_MS,
@@ -82,18 +83,30 @@ interface VisibleElementsDebugTiming {
 
 interface ChromeUserScriptsLike {
   userScripts?: {
+    execute?(injection: UserScriptInjection): Promise<unknown[]>;
     register?(scripts: UserScriptRegistration[]): Promise<void>;
     unregister?(filter?: { ids?: string[] }): Promise<void>;
   };
+}
+
+interface UserScriptInjection {
+  injectImmediately?: boolean;
+  js: Array<{ code: string }>;
+  target: {
+    tabId: number;
+  };
+  world?: 'USER_SCRIPT' | 'MAIN';
 }
 
 interface UserScriptRegistration {
   id: string;
   js: Array<{ code: string }>;
   matches: string[];
-  runAt: UserScriptDefinition['runAt'];
+  runAt: ChromeUserScriptRunAt;
   world?: 'USER_SCRIPT' | 'MAIN';
 }
+
+type ChromeUserScriptRunAt = 'document_start' | 'document_end' | 'document_idle';
 
 type ExecutionEvidenceWithDebugTiming = ExecutionEvidence & {
   visibleElementsDebugTiming?: VisibleElementsDebugTiming;
@@ -215,7 +228,11 @@ class RuntimeClient {
         await this.storeScriptRegistry(envelope.payload.scripts, envelope.timestamp);
         break;
       case 'userscript_registry_sync':
-        await this.storeUserScriptRegistry(envelope.payload.userscripts, envelope.timestamp);
+        await this.storeUserScriptRegistry(
+          envelope.payload.userscripts,
+          envelope.timestamp,
+          envelope.payload.applyNowUserScriptIds,
+        );
         break;
       default:
         break;
@@ -791,12 +808,14 @@ class RuntimeClient {
   private async storeUserScriptRegistry(
     userscripts: UserScriptDefinition[],
     updatedAt: string,
+    applyNowUserScriptIds?: string[],
   ): Promise<void> {
     await browser.storage.local.set({
       [USERSCRIPT_REGISTRY_STORAGE_KEY]: userscripts,
       [USERSCRIPT_REGISTRY_UPDATED_AT_STORAGE_KEY]: updatedAt,
     });
     await this.applyUserScriptRegistry(userscripts);
+    await this.applyUserScriptsNow(userscripts, applyNowUserScriptIds);
   }
 
   private async restoreCachedUserScripts(): Promise<void> {
@@ -822,7 +841,7 @@ class RuntimeClient {
         .map((script) => ({
           id: script.id,
           matches: script.matches,
-          runAt: script.runAt,
+          runAt: toChromeUserScriptRunAt(script.runAt),
           world: 'USER_SCRIPT' as const,
           js: [{ code: script.code }],
         }));
@@ -837,6 +856,50 @@ class RuntimeClient {
     } catch (error) {
       console.warn('[WEB_CAP] chrome.userScripts.register failed:', error);
       await this.storeUserScriptsAvailability(false);
+    }
+  }
+
+  private async applyUserScriptsNow(
+    userscripts: UserScriptDefinition[],
+    applyNowUserScriptIds: string[] | undefined,
+  ): Promise<void> {
+    if (!applyNowUserScriptIds?.length) {
+      return;
+    }
+
+    const userScriptsApi = this.getChromeUserScriptsApi();
+    if (!userScriptsApi?.execute) {
+      console.warn('[WEB_CAP] chrome.userScripts.execute is not available.');
+      return;
+    }
+
+    const scripts = userscripts.filter(
+      (script) => script.status === 'active' && applyNowUserScriptIds.includes(script.id),
+    );
+    if (scripts.length === 0) {
+      return;
+    }
+
+    const tabs = await browser.tabs.query({});
+    for (const tab of tabs) {
+      if (!tab.id || !tab.url) {
+        continue;
+      }
+      for (const script of scripts) {
+        if (!userScriptMatchesUrl(script, tab.url)) {
+          continue;
+        }
+        try {
+          await userScriptsApi.execute({
+            target: { tabId: tab.id },
+            world: 'USER_SCRIPT',
+            injectImmediately: true,
+            js: [{ code: script.code }],
+          });
+        } catch (error) {
+          console.warn('[WEB_CAP] failed to apply userscript now:', script.id, tab.id, error);
+        }
+      }
     }
   }
 
@@ -1278,6 +1341,27 @@ function shouldCollectExecutionEvidence(
       evidence?.includes('common') ||
       evidence?.includes(option),
   );
+}
+
+function userScriptMatchesUrl(script: UserScriptDefinition, url: string): boolean {
+  return script.matches.some((pattern) => {
+    try {
+      return new MatchPattern(pattern).includes(url);
+    } catch {
+      return false;
+    }
+  });
+}
+
+function toChromeUserScriptRunAt(runAt: UserScriptDefinition['runAt']): ChromeUserScriptRunAt {
+  switch (runAt) {
+    case 'document-start':
+      return 'document_start';
+    case 'document-end':
+      return 'document_end';
+    case 'document-idle':
+      return 'document_idle';
+  }
 }
 
 export default defineBackground(() => {

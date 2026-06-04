@@ -22,6 +22,7 @@ import type {
   ExecuteScriptResult,
   InstallUserScriptRequest,
   RemoveUserScriptRequest,
+  UpdateUserScriptStatusRequest,
   WebCapAgentService,
 } from './agent/contracts';
 import { RuntimeBridgeError } from './runtime/runtime-bridge';
@@ -244,6 +245,14 @@ export class WebCapRpcServer {
       }
       case 'userScriptList':
         return await this.app.userScriptList();
+      case 'userScriptEnable': {
+        const params = parseRpcInput(request.method, request.params);
+        return await this.app.userScriptEnable(params);
+      }
+      case 'userScriptDisable': {
+        const params = parseRpcInput(request.method, request.params);
+        return await this.app.userScriptDisable(params);
+      }
       case 'userScriptRemove': {
         const params = parseRpcInput(request.method, request.params);
         return await this.app.userScriptRemove(params);
@@ -338,6 +347,20 @@ export class WebCapRpcClient {
 
   async userScriptList(): Promise<UserScriptDefinition[]> {
     return (await this.request('userScriptList')) as UserScriptDefinition[];
+  }
+
+  async userScriptEnable(request: UpdateUserScriptStatusRequest): Promise<UserScriptDefinition> {
+    return (await this.request(
+      'userScriptEnable',
+      request as unknown as Record<string, unknown>,
+    )) as UserScriptDefinition;
+  }
+
+  async userScriptDisable(request: UpdateUserScriptStatusRequest): Promise<UserScriptDefinition> {
+    return (await this.request(
+      'userScriptDisable',
+      request as unknown as Record<string, unknown>,
+    )) as UserScriptDefinition;
   }
 
   async userScriptRemove(request: RemoveUserScriptRequest): Promise<UserScriptDefinition> {

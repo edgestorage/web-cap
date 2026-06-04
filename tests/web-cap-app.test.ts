@@ -1327,6 +1327,12 @@ describe('WebCapAgentApp', () => {
       async userScriptList() {
         return [];
       },
+      async userScriptEnable() {
+        throw new Error('not used');
+      },
+      async userScriptDisable() {
+        throw new Error('not used');
+      },
       async userScriptRemove() {
         throw new Error('not used');
       },

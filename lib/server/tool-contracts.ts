@@ -49,8 +49,17 @@ export const rpcInputSchemas = {
   scriptRegistryList: z.object({}),
   userScriptInstall: z.object({
     filePath: z.string().min(1),
+    applyNow: z.boolean().optional(),
   }),
   userScriptList: z.object({}),
+  userScriptEnable: z.object({
+    id: z.string().min(1),
+    applyNow: z.boolean().optional(),
+  }),
+  userScriptDisable: z.object({
+    id: z.string().min(1),
+    applyNow: z.boolean().optional(),
+  }),
   userScriptRemove: z.object({
     id: z.string().min(1),
   }),

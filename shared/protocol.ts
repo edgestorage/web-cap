@@ -166,6 +166,7 @@ export interface ScriptRegistrySyncPayload {
 
 export interface UserScriptRegistrySyncPayload {
   userscripts: UserScriptDefinition[];
+  applyNowUserScriptIds?: string[];
 }
 
 export type RuntimeEnvelope =

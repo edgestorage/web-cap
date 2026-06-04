@@ -74,7 +74,7 @@ const registryUpdatedLabel = computed(() => {
 
 const userScriptUpdatedLabel = computed(() => {
   if (!userScriptUpdatedAt.value) {
-    return 'Waiting for userscript sync from MCP';
+    return 'Not synced yet';
   }
 
   const date = new Date(userScriptUpdatedAt.value);

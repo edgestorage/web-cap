@@ -22,10 +22,16 @@ export interface ExecuteScriptRequest {
 
 export interface InstallUserScriptRequest {
   filePath: string;
+  applyNow?: boolean;
 }
 
 export interface RemoveUserScriptRequest {
   id: string;
+}
+
+export interface UpdateUserScriptStatusRequest {
+  id: string;
+  applyNow?: boolean;
 }
 
 export interface ExecuteScriptOptions {
@@ -46,6 +52,8 @@ export interface WebCapAgentService {
   scriptRegistryList(): Promise<ScriptDefinition[]>;
   userScriptInstall(request: InstallUserScriptRequest): Promise<UserScriptDefinition>;
   userScriptList(): Promise<UserScriptDefinition[]>;
+  userScriptEnable(request: UpdateUserScriptStatusRequest): Promise<UserScriptDefinition>;
+  userScriptDisable(request: UpdateUserScriptStatusRequest): Promise<UserScriptDefinition>;
   userScriptRemove(request: RemoveUserScriptRequest): Promise<UserScriptDefinition>;
   browserScreenshot(input: BrowserScreenshotInput): Promise<BrowserScreenshotResult>;
   browserNewTab(input: CreateTabInput): Promise<BrowserCommandResult>;

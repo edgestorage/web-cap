@@ -1,7 +1,7 @@
 import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { glob } from 'tinyglobby';
-import type { UserScriptDefinition } from '@shared/script-schema';
+import type { UserScriptDefinition, UserScriptStatus } from '@shared/script-schema';
 import { userScriptDefinitionSchema } from '@shared/script-schema';
 import { resolveWebCapStateDir } from '../state-dir';
 import {
@@ -15,6 +15,7 @@ export interface UserScriptInstallInput {
 export interface UserScriptProvider {
   install(input: UserScriptInstallInput): Promise<UserScriptDefinition>;
   list(): Promise<UserScriptDefinition[]>;
+  setStatus(id: string, status: UserScriptStatus): Promise<UserScriptDefinition>;
   remove(id: string): Promise<UserScriptDefinition>;
 }
 
@@ -82,6 +83,26 @@ export class FileUserScriptProvider implements UserScriptProvider {
     return existing;
   }
 
+  async setStatus(id: string, status: UserScriptStatus): Promise<UserScriptDefinition> {
+    const existing = await this.findById(id);
+    if (!existing?.sourcePath) {
+      throw new Error(`User script ${id} was not found.`);
+    }
+
+    const source = await readFile(existing.sourcePath, 'utf8');
+    const updatedSource = setUserScriptStatusInSource(source, status);
+    const tempPath = `${existing.sourcePath}.${process.pid}.${Date.now()}.tmp`;
+    await writeFile(tempPath, updatedSource, 'utf8');
+    await rename(tempPath, existing.sourcePath);
+
+    return parseUserScriptDefinition(updatedSource, {
+      id,
+      sourcePath: existing.sourcePath,
+      installedAt: existing.installedAt,
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
   private async findById(id: string): Promise<UserScriptDefinition | undefined> {
     return (await this.list()).find((definition) => definition.id === id);
   }
@@ -109,4 +130,23 @@ export class FileUserScriptProvider implements UserScriptProvider {
 
 function sanitizePathSegment(value: string): string {
   return value.replace(/[^a-zA-Z0-9._-]+/g, '_') || 'userscript';
+}
+
+function setUserScriptStatusInSource(source: string, status: UserScriptStatus): string {
+  const lines = source.split('\n');
+  const headerEndIndex = lines.findIndex((line) => line.includes('*/'));
+  if (headerEndIndex === -1) {
+    throw new Error('User script metadata header was not found.');
+  }
+
+  const statusLineIndex = lines.findIndex((line, index) => {
+    return index <= headerEndIndex && /@status\b/.test(line);
+  });
+  if (statusLineIndex !== -1) {
+    lines[statusLineIndex] = lines[statusLineIndex].replace(/@status\s+\S+/, `@status ${status}`);
+    return lines.join('\n');
+  }
+
+  lines.splice(headerEndIndex, 0, ` * @status ${status}`);
+  return lines.join('\n');
 }

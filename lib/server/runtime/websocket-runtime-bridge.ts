@@ -20,7 +20,12 @@ import {
   type RuntimeTabSummary,
   type RuntimeTabSnapshot,
 } from '@shared/protocol';
-import { RuntimeBridge, RuntimeBridgeError, type BrowserCommandOptions } from './runtime-bridge';
+import {
+  RuntimeBridge,
+  RuntimeBridgeError,
+  type BrowserCommandOptions,
+  type UserScriptSyncOptions,
+} from './runtime-bridge';
 import { DEFAULT_BROWSER_COMMAND_TIMEOUT_MS } from '../browser/command-contracts';
 import {
   resolveScreenshotDirectory,
@@ -407,7 +412,10 @@ export class WebSocketRuntimeBridge implements RuntimeBridge {
     }
   }
 
-  async syncUserScriptRegistry(userscripts: UserScriptDefinition[]): Promise<void> {
+  async syncUserScriptRegistry(
+    userscripts: UserScriptDefinition[],
+    options: UserScriptSyncOptions = {},
+  ): Promise<void> {
     for (const runtime of this.runtimes.values()) {
       this.sendEnvelope(
         runtime,
@@ -415,6 +423,7 @@ export class WebSocketRuntimeBridge implements RuntimeBridge {
           'userscript_registry_sync',
           {
             userscripts,
+            applyNowUserScriptIds: options.applyNowUserScriptIds,
           },
           { sessionId: runtime.snapshot.sessionId },
         ),

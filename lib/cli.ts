@@ -103,7 +103,19 @@ async function handleUserScriptCommand(
 ): Promise<unknown> {
   switch (options.action) {
     case 'install':
-      return await app.userScriptInstall({ filePath: options.file! });
+      return await app.userScriptInstall({
+        filePath: options.file!,
+        applyNow: options.applyNow,
+      });
+    case 'enable':
+      return await app.userScriptEnable({
+        id: options.id!,
+        applyNow: options.applyNow,
+      });
+    case 'disable':
+      return await app.userScriptDisable({
+        id: options.id!,
+      });
     case 'remove':
       return await app.userScriptRemove({ id: options.id! });
     case 'show': {

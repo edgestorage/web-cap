@@ -46,6 +46,15 @@ describe('userscript provider', () => {
     });
   });
 
+  it('parses disabled userscript status from metadata', () => {
+    const definition = parseUserScriptDefinition(validUserScript.replace(
+      ' * @runAt document-idle',
+      ' * @runAt document-idle\n * @status disabled',
+    ));
+
+    expect(definition.status).toBe('disabled');
+  });
+
   it('rejects userscripts without @match', () => {
     expect(() =>
       parseUserScriptDefinition(`/**
@@ -95,5 +104,24 @@ console.log('foo');
 
     expect(removed.id).toBe('userscript.foo');
     await expect(provider.list()).resolves.toHaveLength(0);
+  });
+
+  it('persists userscript status changes in the script metadata', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'web-cap-userscript-test-'));
+    const sourceFile = join(tempDir, 'foo.js');
+    await writeFile(sourceFile, validUserScript, 'utf8');
+
+    const provider = new FileUserScriptProvider(tempDir);
+    await provider.install({ filePath: sourceFile });
+    const disabled = await provider.setStatus('userscript.foo', 'disabled');
+    const storedSource = await readFile(join(tempDir, 'userscripts', 'userscript.foo.js'), 'utf8');
+
+    expect(disabled.status).toBe('disabled');
+    expect(storedSource).toContain('@status disabled');
+    await expect(provider.list()).resolves.toMatchObject([{ status: 'disabled' }]);
+
+    const enabled = await provider.setStatus('userscript.foo', 'active');
+    expect(enabled.status).toBe('active');
+    await expect(provider.list()).resolves.toMatchObject([{ status: 'active' }]);
   });
 });

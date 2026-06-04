@@ -40,6 +40,12 @@ describe('WEB_CAP CLI', () => {
       async userScriptList() {
         return [];
       },
+      async userScriptEnable() {
+        throw new Error('not used');
+      },
+      async userScriptDisable() {
+        throw new Error('not used');
+      },
       async userScriptRemove() {
         throw new Error('not used');
       },
@@ -225,11 +231,27 @@ describe('WEB_CAP CLI', () => {
         pretty: true,
       },
     });
-    expect(parseCliArgs(['userscript', 'install', '--file', './foo.js'])).toEqual({
+    expect(parseCliArgs(['userscript', 'install', '--file', './foo.js', '--apply-now'])).toEqual({
       name: 'userscript',
       options: {
         action: 'install',
         file: './foo.js',
+        applyNow: true,
+      },
+    });
+    expect(parseCliArgs(['userscript', 'enable', 'userscript.foo', '--apply-now'])).toEqual({
+      name: 'userscript',
+      options: {
+        action: 'enable',
+        id: 'userscript.foo',
+        applyNow: true,
+      },
+    });
+    expect(parseCliArgs(['userscript', 'disable', 'userscript.foo'])).toEqual({
+      name: 'userscript',
+      options: {
+        action: 'disable',
+        id: 'userscript.foo',
       },
     });
     expect(parseCliArgs(['userscript', 'remove', 'userscript.foo'])).toEqual({
@@ -248,6 +270,8 @@ describe('WEB_CAP CLI', () => {
       },
     });
     expect(() => parseCliArgs(['userscript', 'install'])).toThrow(/--file/);
+    expect(() => parseCliArgs(['userscript', 'enable'])).toThrow(/requires an id/);
+    expect(() => parseCliArgs(['userscript', 'disable', 'userscript.foo', '--apply-now'])).toThrow(/--apply-now/);
     expect(() => parseCliArgs(['userscript', 'remove'])).toThrow(/requires an id/);
     expect(() => parseCliArgs(['userscript', 'show'])).toThrow(/requires an id/);
   });
@@ -407,7 +431,7 @@ describe('WEB_CAP CLI', () => {
     const calls: string[] = [];
     const service = createService({
       async userScriptInstall(request) {
-        calls.push(`install:${request.filePath}`);
+        calls.push(`install:${request.filePath}:${request.applyNow === true}`);
         return {
           id: 'userscript.foo',
           name: 'Foo',
@@ -451,6 +475,34 @@ describe('WEB_CAP CLI', () => {
           updatedAt: '2026-06-04T00:00:00.000Z',
         };
       },
+      async userScriptEnable(request) {
+        calls.push(`enable:${request.id}:${request.applyNow === true}`);
+        return {
+          id: request.id,
+          name: 'Foo',
+          version: '1.0.0',
+          status: 'active',
+          matches: ['https://example.com/*'],
+          runAt: 'document-idle',
+          code: 'console.log("foo");',
+          installedAt: '2026-06-04T00:00:00.000Z',
+          updatedAt: '2026-06-04T00:00:00.000Z',
+        };
+      },
+      async userScriptDisable(request) {
+        calls.push(`disable:${request.id}`);
+        return {
+          id: request.id,
+          name: 'Foo',
+          version: '1.0.0',
+          status: 'disabled',
+          matches: ['https://example.com/*'],
+          runAt: 'document-idle',
+          code: 'console.log("foo");',
+          installedAt: '2026-06-04T00:00:00.000Z',
+          updatedAt: '2026-06-04T00:00:00.000Z',
+        };
+      },
       sessionStatus() {
         return {
           connected: true,
@@ -464,7 +516,7 @@ describe('WEB_CAP CLI', () => {
     let stdout = '';
     let stderr = '';
     let code = await runCli(
-      ['userscript', 'install', '--file', './foo.js'],
+      ['userscript', 'install', '--file', './foo.js', '--apply-now'],
       {
         stdout: { write: (chunk: string) => { stdout += chunk; return true; } },
         stderr: { write: (chunk: string) => { stderr += chunk; return true; } },
@@ -475,6 +527,32 @@ describe('WEB_CAP CLI', () => {
     expect(code).toBe(0);
     expect(stderr).toBe('');
     expect(JSON.parse(stdout)).toMatchObject({ id: 'userscript.foo' });
+
+    stdout = '';
+    code = await runCli(
+      ['userscript', 'enable', 'userscript.foo', '--apply-now'],
+      {
+        stdout: { write: (chunk: string) => { stdout += chunk; return true; } },
+        stderr: { write: (chunk: string) => { stderr += chunk; return true; } },
+      },
+      async () => service,
+    );
+
+    expect(code).toBe(0);
+    expect(JSON.parse(stdout)).toMatchObject({ id: 'userscript.foo', status: 'active' });
+
+    stdout = '';
+    code = await runCli(
+      ['userscript', 'disable', 'userscript.foo'],
+      {
+        stdout: { write: (chunk: string) => { stdout += chunk; return true; } },
+        stderr: { write: (chunk: string) => { stderr += chunk; return true; } },
+      },
+      async () => service,
+    );
+
+    expect(code).toBe(0);
+    expect(JSON.parse(stdout)).toMatchObject({ id: 'userscript.foo', status: 'disabled' });
 
     stdout = '';
     code = await runCli(
@@ -516,7 +594,14 @@ describe('WEB_CAP CLI', () => {
 
     expect(code).toBe(0);
     expect(JSON.parse(stdout)).toMatchObject({ id: 'userscript.foo' });
-    expect(calls).toEqual(['install:./foo.js', 'list', 'list', 'remove:userscript.foo']);
+    expect(calls).toEqual([
+      'install:./foo.js:true',
+      'enable:userscript.foo:true',
+      'disable:userscript.foo',
+      'list',
+      'list',
+      'remove:userscript.foo',
+    ]);
   });
 
   it('prints a userscript support notice for userscript commands', async () => {
@@ -886,6 +971,12 @@ describe('WEB_CAP CLI', () => {
       async userScriptList() {
         return [];
       },
+      async userScriptEnable() {
+        throw new Error('not used');
+      },
+      async userScriptDisable() {
+        throw new Error('not used');
+      },
       async userScriptRemove() {
         throw new Error('not used');
       },
@@ -1088,6 +1179,12 @@ describe('WEB_CAP CLI', () => {
       },
       async userScriptList() {
         return [];
+      },
+      async userScriptEnable() {
+        throw new Error('not used');
+      },
+      async userScriptDisable() {
+        throw new Error('not used');
       },
       async userScriptRemove() {
         throw new Error('not used');
