@@ -187,6 +187,34 @@ export default (() => ({ ok: true }));
       `),
     ) as () => Promise<{ ok: boolean }>;
     await expect(parenthesizedExportDefaultArrow()).resolves.toEqual({ ok: true });
+
+    const defaultFunctionWithHelper = eval(
+      scriptToFunctionExpression(`
+export default async function (input) {
+  return buildResult(input.value);
+}
+
+function buildResult(value) {
+  return { ok: true, value };
+}
+      `),
+    ) as (input: { value: string }) => Promise<{ ok: boolean; value: string }>;
+    await expect(defaultFunctionWithHelper({ value: 'helper' })).resolves.toEqual({
+      ok: true,
+      value: 'helper',
+    });
+
+    const defaultArrowWithHelper = eval(
+      scriptToFunctionExpression(`
+export default (input) => buildResult(input.value);
+
+const buildResult = (value) => ({ ok: true, value });
+      `),
+    ) as (input: { value: string }) => Promise<{ ok: boolean; value: string }>;
+    await expect(defaultArrowWithHelper({ value: 'arrow-helper' })).resolves.toEqual({
+      ok: true,
+      value: 'arrow-helper',
+    });
   });
 
   it('inserts a managed input barrier after generated managed input statements', () => {
@@ -251,9 +279,11 @@ return { text, callback };
   });
 
   it('makes non-async click scripts awaitable after barrier insertion', () => {
-    expect(scriptToFunctionExpression('export default function () { button.click(); }')).toMatch(
-      /^\(async function/,
+    const transformedDefaultFunction = scriptToFunctionExpression(
+      'export default function () { button.click(); }',
     );
+    expect(transformedDefaultFunction).toContain('async function');
+    expect(transformedDefaultFunction).toContain('await cap.waitForManagedInput();');
     expect(scriptToFunctionExpression('() => { button.click(); }')).toMatch(/^\(async \(\) =>/);
     expect(
       scriptToFunctionExpression(`

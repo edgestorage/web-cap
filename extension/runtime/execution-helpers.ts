@@ -70,15 +70,17 @@ function readDefaultExportSource(code: string): FunctionSource | undefined {
 
   if (ts.isExportAssignment(firstStatement)) {
     const expression = skipExpressionParens(firstStatement.expression);
-    const source = expression.getText(sourceFile);
-    if (!isFunctionLikeExpression(expression) || hasAsyncModifier(expression)) {
-      return { source, needsAsync: false };
-    }
-
-    return {
-      source,
-      needsAsync: true,
-    };
+    const defaultExportSource = ensureAsyncFunctionSource({
+      source: expression.getText(sourceFile),
+      needsAsync: isFunctionLikeExpression(expression) && !hasAsyncModifier(expression),
+    });
+    const source = wrapDefaultExportWithModuleScope(
+      code,
+      firstStatement,
+      defaultExportSource,
+      undefined,
+    );
+    return { source, needsAsync: false };
   }
 
   if (
@@ -94,13 +96,40 @@ function readDefaultExportSource(code: string): FunctionSource | undefined {
     }
 
     const sourceStart = skipWhitespace(code, defaultModifier.end);
-    return {
-      source: code.slice(sourceStart),
+    const sourceEnd = firstStatement.end;
+    const defaultExportSource = ensureAsyncFunctionSource({
+      source: code.slice(sourceStart, sourceEnd),
       needsAsync: !hasAsyncModifier(firstStatement),
+    });
+    return {
+      source: wrapDefaultExportWithModuleScope(
+        code,
+        firstStatement,
+        defaultExportSource,
+        firstStatement.name?.text,
+      ),
+      needsAsync: false,
     };
   }
 
   return undefined;
+}
+
+function wrapDefaultExportWithModuleScope(
+  code: string,
+  defaultExportStatement: ts.Statement,
+  defaultExportSource: string,
+  declarationName: string | undefined,
+): string {
+  const beforeDefaultExport = code.slice(0, defaultExportStatement.getStart()).trim();
+  const afterDefaultExport = code.slice(defaultExportStatement.end).trim();
+  const moduleBody = [beforeDefaultExport, afterDefaultExport].filter(Boolean).join('\n');
+
+  if (declarationName) {
+    return `(() => {\n${defaultExportSource}\n${moduleBody ? `${moduleBody}\n` : ''}return ${declarationName};\n})()`;
+  }
+
+  return `(() => {\nconst __webCapDefaultExport = ${defaultExportSource};\n${moduleBody ? `${moduleBody}\n` : ''}return __webCapDefaultExport;\n})()`;
 }
 
 function readTopLevelFunctionSource(code: string): FunctionSource | undefined {
