@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -18,6 +18,7 @@ describe('WEB_CAP CLI', () => {
       tempDir = '';
     }
     delete process.env.WEB_CAP_STATE_DIR;
+    delete process.env.WEB_CAP_PATH;
   });
 
   function createService(overrides: Partial<WebCapAgentService>): WebCapAgentService {
@@ -589,6 +590,216 @@ describe('WEB_CAP CLI', () => {
     expect(prettyCode).toBe(0);
     expect(stderr).toBe('');
     expect(stdout).toContain('\n  "connected": false');
+  });
+
+  it('prints session status grouped by runtime with reusable script counts', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'web-cap-cli-test-'));
+    process.env.WEB_CAP_PATH = tempDir;
+    await mkdir(join(tempDir, 'github.com'), { recursive: true });
+    await writeFile(
+      join(tempDir, 'github.com', 'read-issue.js'),
+      'export default async function () {}',
+    );
+    await writeFile(
+      join(tempDir, 'github.com', 'fill-search.js'),
+      'export default async function () {}',
+    );
+    await writeFile(join(tempDir, 'github.com', 'README.md'), '# github.com scripts');
+    await mkdir(join(tempDir, 'example.com'), { recursive: true });
+    await writeFile(
+      join(tempDir, 'example.com', 'read-page.js'),
+      'export default async function () {}',
+    );
+
+    const service = createService({
+      sessionStatus() {
+        return {
+          connected: true,
+          sessionId: 'active-runtime',
+          browserName: 'Chrome',
+          extensionVersion: '1.2.3',
+          activeTab: {
+            tabId: 7,
+            url: 'https://github.com/edgestorage/web-cap/issues',
+            title: 'Issues',
+            site: 'generic-web',
+            readyState: 'complete',
+            updatedAt: '2026-05-15T00:00:00.000Z',
+          },
+          tabs: [
+            {
+              tabId: 7,
+              url: 'https://github.com/edgestorage/web-cap/issues',
+              title: 'Issues',
+              site: 'generic-web',
+              readyState: 'complete',
+              updatedAt: '2026-05-15T00:00:00.000Z',
+            },
+          ],
+          authenticatedSites: ['github.com'],
+          lastSeenAt: '2026-05-15T00:00:01.000Z',
+          runtimes: [
+            {
+              connected: true,
+              sessionId: 'active-runtime',
+              browserName: 'Chrome',
+              extensionVersion: '1.2.3',
+              activeTab: {
+                tabId: 7,
+                url: 'https://github.com/edgestorage/web-cap/issues',
+                title: 'Issues',
+                site: 'generic-web',
+                readyState: 'complete',
+                updatedAt: '2026-05-15T00:00:00.000Z',
+              },
+              tabs: [
+                {
+                  tabId: 7,
+                  url: 'https://github.com/edgestorage/web-cap/issues',
+                  title: 'Issues',
+                  site: 'generic-web',
+                  readyState: 'complete',
+                  updatedAt: '2026-05-15T00:00:00.000Z',
+                },
+              ],
+              authenticatedSites: ['github.com'],
+              lastSeenAt: '2026-05-15T00:00:01.000Z',
+            },
+            {
+              connected: true,
+              sessionId: 'second-runtime',
+              browserName: 'Edge',
+              extensionVersion: '1.2.3',
+              activeTab: {
+                tabId: 7,
+                url: 'https://example.com/docs',
+                title: 'Docs',
+                site: 'generic-web',
+                readyState: 'complete',
+                updatedAt: '2026-05-15T00:00:00.000Z',
+              },
+              tabs: [
+                {
+                  tabId: 7,
+                  url: 'https://example.com/docs',
+                  title: 'Docs',
+                  site: 'generic-web',
+                  readyState: 'complete',
+                  updatedAt: '2026-05-15T00:00:00.000Z',
+                },
+                {
+                  tabId: 8,
+                  url: 'https://empty.example/docs',
+                  title: 'Empty Docs',
+                  site: 'generic-web',
+                  readyState: 'complete',
+                  updatedAt: '2026-05-15T00:00:00.000Z',
+                },
+              ],
+              authenticatedSites: [],
+              lastSeenAt: '2026-05-15T00:00:02.000Z',
+            },
+          ],
+        };
+      },
+    });
+
+    let stdout = '';
+    let stderr = '';
+    const code = await runCli(
+      ['session-status'],
+      {
+        stdout: { write: (chunk: string) => { stdout += chunk; return true; } },
+        stderr: { write: (chunk: string) => { stderr += chunk; return true; } },
+      },
+      async () => service,
+    );
+
+    expect(code).toBe(0);
+    expect(stderr).toBe('');
+    const parsed = JSON.parse(stdout) as Record<string, any>;
+    expect(parsed).toEqual({
+      connected: true,
+      reusableScripts: {
+        webCapPath: tempDir,
+        domains: [
+          {
+            domain: 'example.com',
+            count: 1,
+            directory: join(tempDir, 'example.com'),
+          },
+          {
+            domain: 'github.com',
+            count: 2,
+            directory: join(tempDir, 'github.com'),
+          },
+        ],
+      },
+      runtimes: [
+        {
+          sessionId: 'active-runtime',
+          browserName: 'Chrome',
+          extensionVersion: '1.2.3',
+          lastSeenAt: '2026-05-15T00:00:01.000Z',
+          activeTab: {
+            tabId: 7,
+            url: 'https://github.com/edgestorage/web-cap/issues',
+            title: 'Issues',
+            site: 'generic-web',
+            readyState: 'complete',
+          },
+          tabs: [
+            {
+              tabId: 7,
+              url: 'https://github.com/edgestorage/web-cap/issues',
+              title: 'Issues',
+              site: 'generic-web',
+              readyState: 'complete',
+            },
+          ],
+        },
+        {
+          sessionId: 'second-runtime',
+          browserName: 'Edge',
+          extensionVersion: '1.2.3',
+          lastSeenAt: '2026-05-15T00:00:02.000Z',
+          activeTab: {
+            tabId: 7,
+            url: 'https://example.com/docs',
+            title: 'Docs',
+            site: 'generic-web',
+            readyState: 'complete',
+          },
+          tabs: [
+            {
+              tabId: 7,
+              url: 'https://example.com/docs',
+              title: 'Docs',
+              site: 'generic-web',
+              readyState: 'complete',
+            },
+            {
+              tabId: 8,
+              url: 'https://empty.example/docs',
+              title: 'Empty Docs',
+              site: 'generic-web',
+              readyState: 'complete',
+            },
+          ],
+        },
+      ],
+    });
+    expect(parsed.reusableScripts.domains).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ domain: 'empty.example' })]),
+    );
+    expect(parsed).not.toHaveProperty('lastActiveTab');
+    expect(parsed).not.toHaveProperty('tabs');
+    expect(parsed).not.toHaveProperty('authenticatedSites');
+    expect(parsed.runtimes[0]).not.toHaveProperty('authenticatedSites');
+    expect(parsed.runtimes[0].tabs[0]).not.toHaveProperty('updatedAt');
+    expect(parsed.runtimes[0].tabs[0]).not.toHaveProperty('reusableScripts');
+    expect(parsed.runtimes[1].tabs[0]).not.toHaveProperty('updatedAt');
+    expect(parsed.runtimes[1].tabs[0]).not.toHaveProperty('reusableScripts');
   });
 
   it('runs the stdio MCP adapter as a CLI command', async () => {

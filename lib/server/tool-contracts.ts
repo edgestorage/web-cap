@@ -1,7 +1,14 @@
 import { z } from 'zod';
+import { readdir } from 'node:fs/promises';
+import { join } from 'node:path';
 import {
   MAX_EXECUTION_TIMEOUT_MS,
 } from '@shared/script-schema';
+import type {
+  RuntimeConnectionSnapshot,
+  RuntimeSessionSnapshot,
+  RuntimeTabSnapshot,
+} from '@shared/protocol';
 import { WEB_CAP_EVIDENCE_OPTIONS } from '../config';
 import type { WebCapAgentService } from './agent/contracts';
 import { browserCommandRequestSchemas } from './browser/command-contracts';
@@ -71,7 +78,7 @@ export const mcpToolDefinitions: {
   session_status: {
     title: 'Get Session Status',
     description:
-      'Return the current browser runtime connection status, including the last active tab, all known tabs for the active runtime, and connected runtime snapshots.',
+      'Return browser runtime connection status grouped by runtime, including known tabs and reusable Web Cap script counts for each tab domain.',
     inputSchema: {},
   },
   browser_screenshot: {
@@ -182,18 +189,7 @@ export async function executeCoreTool(
   switch (toolName) {
     case 'session_status': {
       const status = await app.sessionStatus();
-      return {
-        connected: status.connected,
-        sessionId: status.sessionId,
-        browserName: status.browserName,
-        extensionVersion: status.extensionVersion,
-        lastActiveTab: status.activeTab,
-        tabs: status.tabs,
-        authenticatedSites: status.authenticatedSites,
-        userScriptsAvailable: status.userScriptsAvailable,
-        lastSeenAt: status.lastSeenAt,
-        runtimes: status.runtimes ?? [],
-      };
+      return (await formatSessionStatusResult(status)) as unknown as Record<string, unknown>;
     }
     case 'browser_new_tab': {
       const input = parseToolInput(toolName, rawInput);
@@ -207,6 +203,181 @@ export async function executeCoreTool(
       const input = parseToolInput(toolName, rawInput);
       return (await app.scriptExecute(input)) as unknown as Record<string, unknown>;
     }
+  }
+}
+
+interface SessionStatusReusableScriptSummary {
+  domain: string | null;
+  count: number;
+  directory: string | null;
+}
+
+interface SessionStatusTabResult {
+  tabId: number;
+  url: string;
+  title: string;
+  site: string;
+  readyState: string;
+}
+
+interface SessionStatusRuntimeResult {
+  sessionId?: string;
+  browserName?: string;
+  extensionVersion?: string;
+  userScriptsAvailable?: boolean;
+  lastSeenAt?: string;
+  activeTab?: SessionStatusTabResult;
+  tabs: SessionStatusTabResult[];
+}
+
+interface SessionStatusResult {
+  connected: boolean;
+  reusableScripts: {
+    webCapPath: string;
+    domains: SessionStatusReusableScriptSummary[];
+  };
+  runtimes: SessionStatusRuntimeResult[];
+}
+
+async function formatSessionStatusResult(
+  status: RuntimeSessionSnapshot,
+): Promise<SessionStatusResult> {
+  const webCapPath = resolveWebCapPath(process.env);
+  const scriptCountCache = new Map<string, Promise<number>>();
+  const runtimes = statusRuntimes(status).map(formatRuntime);
+
+  return {
+    connected: status.connected,
+    reusableScripts: {
+      webCapPath,
+      domains: await summarizeReusableScriptDomains(
+        collectRuntimeTabs(runtimes),
+        webCapPath,
+        scriptCountCache,
+      ),
+    },
+    runtimes,
+  };
+}
+
+function resolveWebCapPath(env: NodeJS.ProcessEnv): string {
+  const configured = env.WEB_CAP_PATH?.trim();
+  return configured && configured.length > 0 ? configured : '.web-cap';
+}
+
+function statusRuntimes(status: RuntimeSessionSnapshot): RuntimeConnectionSnapshot[] {
+  if (status.runtimes?.length) {
+    return status.runtimes;
+  }
+
+  if (
+    !status.sessionId &&
+    !status.browserName &&
+    !status.extensionVersion &&
+    !status.lastSeenAt &&
+    !status.activeTab &&
+    status.tabs.length === 0
+  ) {
+    return [];
+  }
+
+  return [
+    {
+      connected: status.connected,
+      sessionId: status.sessionId ?? '',
+      browserName: status.browserName,
+      extensionVersion: status.extensionVersion,
+      activeTab: status.activeTab,
+      tabs: status.tabs,
+      authenticatedSites: status.authenticatedSites,
+      userScriptsAvailable: status.userScriptsAvailable,
+      lastSeenAt: status.lastSeenAt,
+    },
+  ];
+}
+
+function formatRuntime(runtime: RuntimeConnectionSnapshot): SessionStatusRuntimeResult {
+  return {
+    sessionId: runtime.sessionId,
+    browserName: runtime.browserName,
+    extensionVersion: runtime.extensionVersion,
+    userScriptsAvailable: runtime.userScriptsAvailable,
+    lastSeenAt: runtime.lastSeenAt,
+    activeTab: runtime.activeTab ? formatTab(runtime.activeTab) : undefined,
+    tabs: runtime.tabs.map(formatTab),
+  };
+}
+
+function formatTab(tab: RuntimeTabSnapshot): SessionStatusTabResult {
+  return {
+    tabId: tab.tabId,
+    url: tab.url,
+    title: tab.title,
+    site: tab.site,
+    readyState: tab.readyState,
+  };
+}
+
+function collectRuntimeTabs(runtimes: SessionStatusRuntimeResult[]): SessionStatusTabResult[] {
+  const tabsByRuntimeId = new Map<string, SessionStatusTabResult>();
+  for (const runtime of runtimes) {
+    if (runtime.activeTab) {
+      tabsByRuntimeId.set(tabKey(runtime, runtime.activeTab), runtime.activeTab);
+    }
+    for (const tab of runtime.tabs) {
+      tabsByRuntimeId.set(tabKey(runtime, tab), tab);
+    }
+  }
+  return [...tabsByRuntimeId.values()];
+}
+
+function tabKey(runtime: SessionStatusRuntimeResult, tab: SessionStatusTabResult): string {
+  return `${runtime.sessionId ?? 'runtime'}:${tab.tabId}`;
+}
+
+async function summarizeReusableScriptDomains(
+  tabs: SessionStatusTabResult[],
+  webCapPath: string,
+  scriptCountCache: Map<string, Promise<number>>,
+): Promise<SessionStatusReusableScriptSummary[]> {
+  const domains = [...new Set(tabs.map((tab) => domainForUrl(tab.url)).filter(isString))].sort();
+  const summaries = domains.map(async (domain) => {
+    const directory = join(webCapPath, domain);
+    let count = scriptCountCache.get(domain);
+    if (!count) {
+      count = countReusableScripts(directory);
+      scriptCountCache.set(domain, count);
+    }
+
+    return {
+      domain,
+      count: await count,
+      directory,
+    };
+  });
+
+  return (await Promise.all(summaries)).filter((summary) => summary.count > 0);
+}
+
+function isString(value: string | null): value is string {
+  return typeof value === 'string';
+}
+
+function domainForUrl(value: string): string | null {
+  try {
+    const url = new URL(value);
+    return url.hostname.toLowerCase() || null;
+  } catch {
+    return null;
+  }
+}
+
+async function countReusableScripts(directory: string): Promise<number> {
+  try {
+    const entries = await readdir(directory, { withFileTypes: true });
+    return entries.filter((entry) => entry.isFile() && entry.name.endsWith('.js')).length;
+  } catch {
+    return 0;
   }
 }
 

@@ -446,7 +446,7 @@ function createUserScriptParser(): Command {
 
 function createSessionStatusParser(): Command {
   return createJsonOutputParser('session-status').description(
-    'Print connected browser status, known tabs, and runtime connection details.',
+    'Print browser runtime status, known tabs, and reusable script counts by tab domain.',
   );
 }
 
