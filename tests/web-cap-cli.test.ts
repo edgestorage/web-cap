@@ -209,6 +209,14 @@ describe('WEB_CAP CLI', () => {
         value: true,
       },
     });
+    expect(parseCliArgs(['config', 'set', 'executionTabGroupIndicator', 'true'])).toEqual({
+      name: 'config',
+      options: {
+        action: 'set',
+        key: 'executionTabGroupIndicator',
+        value: true,
+      },
+    });
     expect(parseCliArgs(['config', 'set', 'evidence', 'events,visibleElements'])).toEqual({
       name: 'config',
       options: {
@@ -1019,6 +1027,8 @@ describe('WEB_CAP CLI', () => {
   });
 
   it('executes through the injected service and prints JSON', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'web-cap-cli-test-'));
+    process.env.WEB_CAP_STATE_DIR = tempDir;
     const calls: ExecuteScriptRequest[] = [];
     const service = {
       async start() {},
@@ -1108,6 +1118,7 @@ describe('WEB_CAP CLI', () => {
         options: {
           tabId: 1,
           evidence: ['common'],
+          executionTabGroupIndicator: true,
         },
       },
     ]);
@@ -1116,6 +1127,73 @@ describe('WEB_CAP CLI', () => {
       result: { ok: true },
     });
     expect(stdout.trim()).toBe(JSON.stringify(JSON.parse(stdout)));
+  });
+
+  it('allows configured tab group indicators to be disabled', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'web-cap-cli-test-'));
+    process.env.WEB_CAP_STATE_DIR = tempDir;
+    const calls: ExecuteScriptRequest[] = [];
+    const service = createService({
+      async scriptExecute(request: ExecuteScriptRequest) {
+        calls.push(request);
+        return {
+          scriptId: 'temp.script.000001',
+          status: 'succeeded',
+          result: { ok: true },
+          evidence: { events: [], screenshots: [] },
+          timingMs: 1,
+        };
+      },
+    });
+    let stdout = '';
+    let stderr = '';
+
+    const setCode = await runCli(
+      ['config', 'set', 'executionTabGroupIndicator', 'false'],
+      {
+        stdout: { write: (chunk: string) => { stdout += chunk; return true; } },
+        stderr: { write: (chunk: string) => { stderr += chunk; return true; } },
+      },
+      async () => {
+        throw new Error('config should not connect to daemon');
+      },
+    );
+
+    expect(setCode).toBe(0);
+    expect(stderr).toBe('');
+    expect(JSON.parse(stdout)).toMatchObject({
+      key: 'executionTabGroupIndicator',
+      value: false,
+      config: { executionTabGroupIndicator: false },
+    });
+
+    stdout = '';
+    const executeCode = await runCli(
+      [
+        'script-execute',
+        '--script',
+        'export default async function () { return { ok: true }; }',
+        '--tab-id',
+        '1',
+      ],
+      {
+        stdout: { write: (chunk: string) => { stdout += chunk; return true; } },
+        stderr: { write: (chunk: string) => { stderr += chunk; return true; } },
+      },
+      async () => service,
+    );
+
+    expect(executeCode).toBe(0);
+    expect(stderr).toBe('');
+    expect(calls).toHaveLength(1);
+    const [call] = calls;
+    if (!call) {
+      throw new Error('Expected script execution call.');
+    }
+    if (!call.options) {
+      throw new Error('Expected script execution options.');
+    }
+    expect(call.options.executionTabGroupIndicator).toBe(false);
   });
 
   it('persists config and applies configured script execution options', async () => {
@@ -1237,6 +1315,32 @@ describe('WEB_CAP CLI', () => {
     });
 
     stdout = '';
+    const setExecutionTabGroupIndicatorCode = await runCli(
+      ['config', 'set', 'executionTabGroupIndicator', 'true'],
+      {
+        stdout: { write: (chunk: string) => { stdout += chunk; return true; } },
+        stderr: { write: (chunk: string) => { stderr += chunk; return true; } },
+      },
+      async () => {
+        throw new Error('config should not connect to daemon');
+      },
+    );
+
+    expect(setExecutionTabGroupIndicatorCode).toBe(0);
+    expect(stderr).toBe('');
+    expect(JSON.parse(stdout)).toMatchObject({
+      key: 'executionTabGroupIndicator',
+      value: true,
+      config: {
+        activateTabOnScriptExecute: true,
+        evidence: ['events', 'visibleElements'],
+        executionPageIndicator: true,
+        executionTabGroupIndicator: true,
+        mouseTrajectorySimulation: true,
+      },
+    });
+
+    stdout = '';
     const executeCode = await runCli(
       [
         'script-execute',
@@ -1263,6 +1367,7 @@ describe('WEB_CAP CLI', () => {
           activateTab: true,
           evidence: ['events', 'visibleElements'],
           executionPageIndicator: true,
+          executionTabGroupIndicator: true,
           mouseTrajectorySimulation: true,
         },
       },

@@ -39,6 +39,8 @@ const USERSCRIPT_REGISTRY_UPDATED_AT_STORAGE_KEY = 'userScriptRegistryUpdatedAt'
 const USERSCRIPT_AVAILABLE_STORAGE_KEY = 'userScriptsAvailable';
 const EXECUTION_BADGE_TEXT = 'RUN';
 const EXECUTION_BADGE_COLOR = '#2563eb';
+const EXECUTION_TAB_GROUP_TITLE = 'RUN';
+const EXECUTION_TAB_GROUP_COLOR = 'blue';
 const EXECUTION_PAGE_INDICATOR_ID = '__web_cap_execution_indicator__';
 const EXECUTION_TAB_INDICATOR_TIMEOUT_MS = 1_000;
 const WEB_CAP_GOTO_CONTINUATION_TYPE = 'web_cap.goto';
@@ -51,6 +53,7 @@ interface BrowserTabLike {
   title?: string;
   active?: boolean;
   openerTabId?: number;
+  groupId?: number;
 }
 
 type ExecutableBrowserTab = BrowserTabLike & {
@@ -84,6 +87,35 @@ interface ExecutionTabIndicatorState {
   requestIds: Set<string>;
   pageIndicatorRequestIds: Set<string>;
   pageIndicatorApplied: boolean;
+  tabGroupIndicatorRequestIds: Set<string>;
+  tabGroupSnapshot?: ExecutionTabGroupSnapshot;
+}
+
+interface ExecutionTabGroupSnapshot {
+  groupId: number;
+  title?: string;
+  color?: string;
+  createdGroup: boolean;
+}
+
+interface BrowserTabGroupLike {
+  id: number;
+  title?: string;
+  color?: string;
+}
+
+interface NativeTabGroupsApi {
+  tabs?: {
+    group(options: { tabIds: number | number[] }): Promise<number>;
+    ungroup(tabIds: number | number[]): Promise<void>;
+  };
+  tabGroups?: {
+    get(groupId: number): Promise<BrowserTabGroupLike>;
+    update(
+      groupId: number,
+      properties: { title?: string; color?: string },
+    ): Promise<BrowserTabGroupLike>;
+  };
 }
 
 interface VisibleElementsDebugTiming {
@@ -225,6 +257,7 @@ class RuntimeClient {
           envelope.payload.screenshotArtifactBasePath,
           envelope.payload.mouseTrajectorySimulation === true,
           envelope.payload.executionPageIndicator === true,
+          envelope.payload.executionTabGroupIndicator === true,
         );
         break;
       case 'browser_command':
@@ -264,6 +297,7 @@ class RuntimeClient {
     screenshotArtifactBasePath?: string,
     mouseTrajectorySimulation = false,
     executionPageIndicator = false,
+    executionTabGroupIndicator = false,
   ): Promise<void> {
     let selectedTab: BrowserTabLike | undefined;
     try {
@@ -317,7 +351,12 @@ class RuntimeClient {
         type: scriptDefinition.type,
       });
 
-      await this.startExecutionTabIndicator(activeTab.id, requestId, executionPageIndicator);
+      await this.startExecutionTabIndicator(
+        activeTab.id,
+        requestId,
+        executionPageIndicator,
+        executionTabGroupIndicator,
+      );
 
       let response: ScriptExecutionResponse | undefined;
       let currentInput = input;
@@ -760,12 +799,16 @@ class RuntimeClient {
     tabId: number,
     requestId: string,
     pageIndicatorEnabled: boolean,
+    tabGroupIndicatorEnabled: boolean,
   ): Promise<void> {
     const existing = this.executionTabIndicators.get(tabId);
     if (existing) {
       existing.requestIds.add(requestId);
       if (pageIndicatorEnabled) {
         existing.pageIndicatorRequestIds.add(requestId);
+      }
+      if (tabGroupIndicatorEnabled) {
+        existing.tabGroupIndicatorRequestIds.add(requestId);
       }
       await this.applyExecutionTabIndicator(tabId);
       return;
@@ -775,6 +818,7 @@ class RuntimeClient {
       requestIds: new Set([requestId]),
       pageIndicatorRequestIds: new Set(pageIndicatorEnabled ? [requestId] : []),
       pageIndicatorApplied: false,
+      tabGroupIndicatorRequestIds: new Set(tabGroupIndicatorEnabled ? [requestId] : []),
     });
     await this.applyExecutionTabIndicator(tabId);
   }
@@ -787,13 +831,16 @@ class RuntimeClient {
 
     existing.requestIds.delete(requestId);
     existing.pageIndicatorRequestIds.delete(requestId);
+    existing.tabGroupIndicatorRequestIds.delete(requestId);
     if (existing.requestIds.size > 0) {
       await this.applyExecutionTabIndicator(tabId);
       return;
     }
 
     const clearPageIndicator = existing.pageIndicatorApplied;
+    const groupSnapshot = existing.tabGroupSnapshot;
     this.executionTabIndicators.delete(tabId);
+    await this.restoreExecutionTabGroupIndicator(tabId, groupSnapshot);
     await this.clearExecutionTabIndicator(tabId, clearPageIndicator);
   }
 
@@ -808,6 +855,8 @@ class RuntimeClient {
   private async applyExecutionTabIndicator(tabId: number): Promise<void> {
     const indicatorState = this.executionTabIndicators.get(tabId);
     const showPageIndicator = (indicatorState?.pageIndicatorRequestIds.size ?? 0) > 0;
+    const showTabGroupIndicator =
+      (indicatorState?.tabGroupIndicatorRequestIds.size ?? 0) > 0;
     const tasks: Array<Promise<unknown>> = [
       browser.action.setBadgeText({ tabId, text: EXECUTION_BADGE_TEXT }),
       browser.action.setBadgeBackgroundColor({ tabId, color: EXECUTION_BADGE_COLOR }),
@@ -833,6 +882,13 @@ class RuntimeClient {
       );
       indicatorState.pageIndicatorApplied = false;
     }
+    if (indicatorState && showTabGroupIndicator) {
+      tasks.push(this.applyExecutionTabGroupIndicator(tabId, indicatorState));
+    } else if (indicatorState?.tabGroupSnapshot) {
+      const snapshot = indicatorState.tabGroupSnapshot;
+      indicatorState.tabGroupSnapshot = undefined;
+      tasks.push(this.restoreExecutionTabGroupIndicator(tabId, snapshot));
+    }
 
     const applyIndicator = Promise.all(tasks)
       .catch((error) => {
@@ -853,6 +909,93 @@ class RuntimeClient {
         timeoutMs: EXECUTION_TAB_INDICATOR_TIMEOUT_MS,
       });
     }
+  }
+
+  private async applyExecutionTabGroupIndicator(
+    tabId: number,
+    indicatorState: ExecutionTabIndicatorState,
+  ): Promise<void> {
+    const tabGroupsApi = this.getTabGroupsApi();
+    if (!tabGroupsApi?.tabGroups || !tabGroupsApi.tabs?.group) {
+      console.info('[WEB_CAP] unable to apply execution tab group indicator', {
+        tabId,
+        reason: 'tab group APIs are unavailable',
+      });
+      return;
+    }
+    if (indicatorState.tabGroupSnapshot) {
+      await tabGroupsApi.tabGroups.update(indicatorState.tabGroupSnapshot.groupId, {
+        title: EXECUTION_TAB_GROUP_TITLE,
+        color: EXECUTION_TAB_GROUP_COLOR,
+      });
+      return;
+    }
+
+    const tab = await browser.tabs.get(tabId) as BrowserTabLike;
+    let groupId: number;
+    let createdGroup = false;
+    if (typeof tab.groupId !== 'number' || tab.groupId < 0) {
+      groupId = await tabGroupsApi.tabs.group({ tabIds: tabId });
+      createdGroup = true;
+    } else {
+      groupId = tab.groupId;
+    }
+
+    const group = await tabGroupsApi.tabGroups.get(groupId);
+    indicatorState.tabGroupSnapshot = {
+      groupId,
+      title: group.title,
+      color: group.color,
+      createdGroup,
+    };
+    await tabGroupsApi.tabGroups.update(groupId, {
+      title: EXECUTION_TAB_GROUP_TITLE,
+      color: EXECUTION_TAB_GROUP_COLOR,
+    });
+    console.info('[WEB_CAP] applied execution tab group indicator', {
+      tabId,
+      groupId,
+      createdGroup,
+      originalTitle: group.title ?? '',
+    });
+  }
+
+  private async restoreExecutionTabGroupIndicator(
+    tabId: number,
+    snapshot: ExecutionTabGroupSnapshot | undefined,
+  ): Promise<void> {
+    if (!snapshot) {
+      return;
+    }
+    const tabGroupsApi = this.getTabGroupsApi();
+    if (!tabGroupsApi?.tabGroups) {
+      return;
+    }
+    if (snapshot.createdGroup) {
+      await tabGroupsApi.tabs?.ungroup(tabId).catch((error) => {
+        console.info('[WEB_CAP] unable to ungroup execution tab group indicator', {
+          tabId,
+          groupId: snapshot.groupId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+      return;
+    }
+
+    await tabGroupsApi.tabGroups.update(snapshot.groupId, {
+      title: snapshot.title ?? '',
+      ...(snapshot.color ? { color: snapshot.color } : {}),
+    }).catch((error) => {
+      console.info('[WEB_CAP] unable to restore execution tab group indicator', {
+        tabId,
+        groupId: snapshot.groupId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+  }
+
+  private getTabGroupsApi(): NativeTabGroupsApi {
+    return (globalThis as typeof globalThis & { chrome?: NativeTabGroupsApi }).chrome ?? {};
   }
 
   private async clearExecutionTabIndicator(

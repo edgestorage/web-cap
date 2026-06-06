@@ -305,6 +305,7 @@ export class WebSocketRuntimeBridge implements RuntimeBridge {
             evidence,
             screenshotArtifactBasePath: resolveScreenshotDirectory(),
             executionPageIndicator: options.executionPageIndicator,
+            executionTabGroupIndicator: options.executionTabGroupIndicator,
             mouseTrajectorySimulation: options.mouseTrajectorySimulation,
           },
           {

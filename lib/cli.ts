@@ -216,6 +216,11 @@ async function applyConfiguredScriptExecutionOptions(
     };
   }
 
+  request.options = {
+    ...request.options,
+    executionTabGroupIndicator: config.executionTabGroupIndicator ?? true,
+  };
+
   if (evidence.length > 0) {
     request.options = {
       ...request.options,
@@ -232,7 +237,10 @@ function readDefaultedConfigValue(
 }
 
 function readDefaultConfigValue(key: keyof WebCapConfig): boolean | string[] {
-  return key === 'evidence' ? ['common'] : false;
+  if (key === 'evidence') {
+    return ['common'];
+  }
+  return key === 'executionTabGroupIndicator';
 }
 
 function coreToolNameForCommand(command: CliCommand): CoreToolName | undefined {

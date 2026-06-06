@@ -40,6 +40,7 @@ export interface ExecuteScriptOptions {
   activateTab?: boolean;
   evidence?: ExecutionEvidenceOption[];
   executionPageIndicator?: boolean;
+  executionTabGroupIndicator?: boolean;
   mouseTrajectorySimulation?: boolean;
 }
 

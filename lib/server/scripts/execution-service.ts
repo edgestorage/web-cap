@@ -39,6 +39,7 @@ export interface ExecutionPlan {
   activateTab?: boolean;
   evidence: ExecutionEvidenceOption[];
   executionPageIndicator?: boolean;
+  executionTabGroupIndicator?: boolean;
   mouseTrajectorySimulation?: boolean;
   includeTabInResult: boolean;
   historyMode: 'temporary' | 'permanent';
@@ -146,6 +147,7 @@ export class ScriptExecutionService {
       activateTab: options.activateTab,
       evidence: normalizeEvidenceOptions(options.evidence),
       executionPageIndicator: options.executionPageIndicator,
+      executionTabGroupIndicator: options.executionTabGroupIndicator ?? true,
       mouseTrajectorySimulation: options.mouseTrajectorySimulation,
       includeTabInResult: options.tabId === undefined,
       historyMode,
@@ -159,6 +161,7 @@ export class ScriptExecutionService {
       activateTab: plan.activateTab,
       evidence: plan.evidence,
       executionPageIndicator: plan.executionPageIndicator,
+      executionTabGroupIndicator: plan.executionTabGroupIndicator,
       mouseTrajectorySimulation: plan.mouseTrajectorySimulation,
       includeTabInResult: plan.includeTabInResult,
     });

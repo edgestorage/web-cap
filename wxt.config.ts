@@ -16,7 +16,7 @@ export default defineConfig({
     name: 'WEB_CAP',
     description:
       'Local-first browser automation runtime for Web Cap CLI to inspect tabs, run scripts, and observe page actions.',
-    permissions: ['storage', 'tabs', 'scripting', 'debugger', 'userScripts'],
+    permissions: ['storage', 'tabs', 'tabGroups', 'scripting', 'debugger', 'userScripts'],
     host_permissions: ['http://*/*', 'https://*/*'],
     browser_specific_settings: {
       gecko: {

@@ -595,6 +595,7 @@ function parseConfigKeyOption(value: string): WebCapConfigKey {
     value === 'activateTabOnScriptExecute' ||
     value === 'evidence' ||
     value === 'executionPageIndicator' ||
+    value === 'executionTabGroupIndicator' ||
     value === 'mouseTrajectorySimulation'
   ) {
     return value;

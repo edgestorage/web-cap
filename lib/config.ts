@@ -9,6 +9,7 @@ export const WEB_CAP_CONFIG_KEYS = [
   'activateTabOnScriptExecute',
   'evidence',
   'executionPageIndicator',
+  'executionTabGroupIndicator',
   'mouseTrajectorySimulation',
 ] as const;
 export const WEB_CAP_EVIDENCE_OPTIONS = ['events', 'visibleElements', 'common', 'all'] as const;
@@ -18,6 +19,7 @@ const webCapConfigSchema = z
     activateTabOnScriptExecute: z.boolean().optional(),
     evidence: z.array(z.enum(WEB_CAP_EVIDENCE_OPTIONS)).optional(),
     executionPageIndicator: z.boolean().optional(),
+    executionTabGroupIndicator: z.boolean().optional(),
     mouseTrajectorySimulation: z.boolean().optional(),
   })
   .default({});

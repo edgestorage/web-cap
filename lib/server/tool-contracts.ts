@@ -30,6 +30,7 @@ export const executeScriptOptionsSchema = z
     activateTab: z.boolean().optional(),
     evidence: z.array(z.enum(WEB_CAP_EVIDENCE_OPTIONS)).optional(),
     executionPageIndicator: z.boolean().optional(),
+    executionTabGroupIndicator: z.boolean().optional(),
     mouseTrajectorySimulation: z.boolean().optional(),
   })
   .default({});
@@ -170,6 +171,10 @@ export const mcpToolDefinitions: {
             .boolean()
             .optional()
             .describe('When true, show a transparent in-page execution indicator while the script runs. Defaults to false.'),
+          executionTabGroupIndicator: z
+            .boolean()
+            .optional()
+            .describe('When true, temporarily update the target tab group title/color while the script runs. Ungrouped tabs are placed in a temporary group and restored after execution. Defaults to true.'),
           mouseTrajectorySimulation: z
             .boolean()
             .optional()
