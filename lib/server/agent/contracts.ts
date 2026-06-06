@@ -39,6 +39,7 @@ export interface ExecuteScriptOptions {
   timeoutMs?: number;
   activateTab?: boolean;
   evidence?: ExecutionEvidenceOption[];
+  executionPageIndicator?: boolean;
   mouseTrajectorySimulation?: boolean;
 }
 

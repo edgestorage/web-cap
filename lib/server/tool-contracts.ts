@@ -29,6 +29,7 @@ export const executeScriptOptionsSchema = z
       .optional(),
     activateTab: z.boolean().optional(),
     evidence: z.array(z.enum(WEB_CAP_EVIDENCE_OPTIONS)).optional(),
+    executionPageIndicator: z.boolean().optional(),
     mouseTrajectorySimulation: z.boolean().optional(),
   })
   .default({});
@@ -165,6 +166,10 @@ export const mcpToolDefinitions: {
             .array(z.enum(WEB_CAP_EVIDENCE_OPTIONS))
             .optional()
             .describe('Evidence to collect for the script run. Use multiple entries such as ["events", "visibleElements"], or ["all"]. Defaults to ["common"].'),
+          executionPageIndicator: z
+            .boolean()
+            .optional()
+            .describe('When true, show a transparent in-page execution indicator while the script runs. Defaults to false.'),
           mouseTrajectorySimulation: z
             .boolean()
             .optional()

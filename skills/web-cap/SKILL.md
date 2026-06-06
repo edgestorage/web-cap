@@ -152,6 +152,7 @@ Write scripts as small browser functions with clear boundaries:
 - Filter hidden elements with computed style and bounding boxes.
 - Use waits sparingly and expose timing through result fields when it affects reliability.
 - For destructive actions, return a preview plan first unless the user explicitly asked to perform the action.
+- For controlled multi-page workflows, return `cap.goto(url, nextInput)`. Web Cap navigates to `url`, then reruns the same script with `nextInput` as `input`.
 
 Example one-off read:
 
@@ -181,6 +182,32 @@ export default async function (input) {
 
   return {
     ok: true,
+    url: location.href,
+    title: document.title
+  };
+}
+```
+
+Example controlled multi-page workflow:
+
+```javascript
+export default async function (input = {}) {
+  if (!input.step) {
+    return cap.goto("/results", { step: "results", query: input.query });
+  }
+
+  if (input.step === "results") {
+    const href = await page.locator("a").first().getAttribute("href");
+    if (!href) {
+      return { ok: false, error: "No result link found.", url: location.href, title: document.title };
+    }
+    return cap.goto(href, { step: "detail", query: input.query, href });
+  }
+
+  return {
+    ok: true,
+    query: input.query,
+    href: input.href,
     url: location.href,
     title: document.title
   };

@@ -209,6 +209,13 @@ async function applyConfiguredScriptExecutionOptions(
     };
   }
 
+  if (config.executionPageIndicator === true) {
+    request.options = {
+      ...request.options,
+      executionPageIndicator: true,
+    };
+  }
+
   if (evidence.length > 0) {
     request.options = {
       ...request.options,

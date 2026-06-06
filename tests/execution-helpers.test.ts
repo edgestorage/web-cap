@@ -417,6 +417,74 @@ export default async function (input) {
     });
   });
 
+  it('lets cap.goto return an internal continuation before output validation', async () => {
+    Object.defineProperty(globalThis, 'location', {
+      value: { href: 'https://example.com/start' },
+      configurable: true,
+    });
+
+    const script = scriptDefinitionSchema.parse({
+      id: 'workflow.goto',
+      name: 'Workflow Goto',
+      version: '1.0.0',
+      status: 'active',
+      type: 'act',
+      summary: 'Continues after navigation.',
+      target: {
+        site: 'generic-web',
+        urlPatterns: ['http://*', 'https://*'],
+        pageHints: [],
+      },
+      tags: ['test'],
+      inputSchema: {
+        type: 'object',
+        properties: {
+          query: { type: 'string' },
+        },
+        required: ['query'],
+        additionalProperties: true,
+      },
+      outputSchema: {
+        type: 'object',
+        properties: {
+          ok: { type: 'boolean' },
+        },
+        required: ['ok'],
+        additionalProperties: false,
+      },
+      script: {
+        timeoutMs: 1_000,
+        code: `
+export default async function (input) {
+  return cap.goto('/next', { step: 'next', query: input.query });
+}
+        `.trim(),
+      },
+    });
+
+    const expression = buildScriptExecutionExpression(
+      script,
+      { query: 'web-cap' },
+      [],
+      { evidence: ['events'] },
+    );
+
+    const response = (await eval(expression)) as {
+      ok: boolean;
+      result?: Record<string, unknown>;
+    };
+
+    expect(response.ok).toBe(true);
+    expect(response.result).toEqual({
+      __webCapType: 'web_cap.goto',
+      url: '/next',
+      input: {
+        step: 'next',
+        query: 'web-cap',
+      },
+    });
+  });
+
   it('records Playwright mouse actions as managed action evidence', async () => {
     const commands: Array<{ method: string; params: Record<string, unknown> }> = [];
     const bridgeName = '__webCapTestBrowserBridge';

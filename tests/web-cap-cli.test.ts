@@ -201,6 +201,14 @@ describe('WEB_CAP CLI', () => {
         value: true,
       },
     });
+    expect(parseCliArgs(['config', 'set', 'executionPageIndicator', 'true'])).toEqual({
+      name: 'config',
+      options: {
+        action: 'set',
+        key: 'executionPageIndicator',
+        value: true,
+      },
+    });
     expect(parseCliArgs(['config', 'set', 'evidence', 'events,visibleElements'])).toEqual({
       name: 'config',
       options: {
@@ -296,8 +304,10 @@ describe('WEB_CAP CLI', () => {
     expect(stdout).toContain('Runs JavaScript in the selected browser tab.');
     expect(stdout).not.toContain('use cap.call(...) inside the script');
     expect(stdout).toContain('Playwright-style page API as global page and cap.page');
+    expect(stdout).toContain('cap.goto(url, input) for controlled multi-page workflows');
     expect(stdout).toContain("await page.getByRole('button', { name: 'Login' }).click();");
     expect(stdout).toContain("await page.locator('input[name=email]').fill(input.email);");
+    expect(stdout).toContain("return cap.goto('/next-page', { step: 'next' });");
     expect(stdout).toContain('--script-file <path>');
     expect(stdout).toContain('--tab-id <id>');
     expect(stdout).toContain('--timeout-ms <ms>');
@@ -322,6 +332,7 @@ describe('WEB_CAP CLI', () => {
     expect(stdout).toContain('Runtime script APIs:');
     expect(stdout).toContain('page / cap.page');
     expect(stdout).toContain('page.locator()');
+    expect(stdout).toContain("return cap.goto('/next-page', { step: 'next' });");
     expect(stdout).not.toContain('inline script code through the local runtime daemon');
     expect(stdout).toContain('--script <code>');
     expect(stdout).toContain('--script-file <path>');
@@ -1201,6 +1212,31 @@ describe('WEB_CAP CLI', () => {
     });
 
     stdout = '';
+    const setExecutionPageIndicatorCode = await runCli(
+      ['config', 'set', 'executionPageIndicator', 'true'],
+      {
+        stdout: { write: (chunk: string) => { stdout += chunk; return true; } },
+        stderr: { write: (chunk: string) => { stderr += chunk; return true; } },
+      },
+      async () => {
+        throw new Error('config should not connect to daemon');
+      },
+    );
+
+    expect(setExecutionPageIndicatorCode).toBe(0);
+    expect(stderr).toBe('');
+    expect(JSON.parse(stdout)).toMatchObject({
+      key: 'executionPageIndicator',
+      value: true,
+      config: {
+        activateTabOnScriptExecute: true,
+        evidence: ['events', 'visibleElements'],
+        executionPageIndicator: true,
+        mouseTrajectorySimulation: true,
+      },
+    });
+
+    stdout = '';
     const executeCode = await runCli(
       [
         'script-execute',
@@ -1226,6 +1262,7 @@ describe('WEB_CAP CLI', () => {
           tabId: 9,
           activateTab: true,
           evidence: ['events', 'visibleElements'],
+          executionPageIndicator: true,
           mouseTrajectorySimulation: true,
         },
       },

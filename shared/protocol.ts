@@ -68,6 +68,7 @@ export interface ExecuteScriptPayload {
   activateTab?: boolean;
   evidence?: ExecutionEvidenceOption[];
   screenshotArtifactBasePath?: string;
+  executionPageIndicator?: boolean;
   mouseTrajectorySimulation?: boolean;
 }
 
@@ -340,6 +341,7 @@ export interface ExecuteScriptOptions {
   scriptRegistry?: ScriptDefinition[];
   activateTab?: boolean;
   evidence?: ExecutionEvidenceOption[];
+  executionPageIndicator?: boolean;
   mouseTrajectorySimulation?: boolean;
   includeTabInResult?: boolean;
 }

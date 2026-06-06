@@ -1,51 +1,32 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import type { ScriptExecutionHistoryEntry } from '@shared/protocol';
-import type { ScriptDefinition, ScriptType, UserScriptDefinition } from '@shared/script-schema';
+import type { UserScriptDefinition } from '@shared/script-schema';
 
 const SCRIPT_HISTORY_STORAGE_KEY = 'scriptExecutionHistory';
 const SCRIPT_HISTORY_UPDATED_AT_STORAGE_KEY = 'scriptExecutionHistoryUpdatedAt';
-const SCRIPT_REGISTRY_STORAGE_KEY = 'scriptRegistry';
-const SCRIPT_REGISTRY_UPDATED_AT_STORAGE_KEY = 'scriptRegistryUpdatedAt';
 const USERSCRIPT_REGISTRY_STORAGE_KEY = 'userScriptRegistry';
 const USERSCRIPT_REGISTRY_UPDATED_AT_STORAGE_KEY = 'userScriptRegistryUpdatedAt';
 const USERSCRIPT_AVAILABLE_STORAGE_KEY = 'userScriptsAvailable';
 
 const entries = ref<ScriptExecutionHistoryEntry[]>([]);
-const scripts = ref<ScriptDefinition[]>([]);
 const userScripts = ref<UserScriptDefinition[]>([]);
 const updatedAt = ref('');
-const registryUpdatedAt = ref('');
 const userScriptUpdatedAt = ref('');
 const userScriptsAvailable = ref(false);
 const isLoading = ref(true);
-const activeView = ref<'registry' | 'userscripts' | 'history'>('registry');
-const scriptTypeFilter = ref<'all' | ScriptType>('all');
+const activeView = ref<'userscripts' | 'history'>('userscripts');
 const expandedScripts = ref<string[]>([]);
 const dialogTitle = ref('');
 const dialogContent = ref('');
 
 const visibleEntries = computed(() => entries.value.slice(0, 12));
-const registeredScripts = computed(() =>
-  scripts.value.filter((script) => !script.id.startsWith('temp.script.')),
-);
-const filteredScripts = computed(() => {
-  return registeredScripts.value
-    .filter((script) => scriptTypeFilter.value === 'all' || script.type === scriptTypeFilter.value)
-    .slice(0, 30);
-});
 
 const summary = computed(() => {
   const running = entries.value.filter((entry) => entry.status === 'running').length;
   const failed = entries.value.filter((entry) => entry.status === 'failed').length;
   const succeeded = entries.value.filter((entry) => entry.status === 'succeeded').length;
   return { running, failed, succeeded };
-});
-
-const registrySummary = computed(() => {
-  const builtIn = registeredScripts.value.filter((script) => script.id.startsWith('builtin.')).length;
-  const registered = registeredScripts.value.length - builtIn;
-  return { builtIn, registered, total: registeredScripts.value.length };
 });
 
 const userScriptSummary = computed(() => {
@@ -63,15 +44,6 @@ const lastUpdatedLabel = computed(() => {
   return Number.isNaN(date.getTime()) ? updatedAt.value : date.toLocaleString();
 });
 
-const registryUpdatedLabel = computed(() => {
-  if (!registryUpdatedAt.value) {
-    return 'Waiting for registry sync from MCP';
-  }
-
-  const date = new Date(registryUpdatedAt.value);
-  return Number.isNaN(date.getTime()) ? registryUpdatedAt.value : date.toLocaleString();
-});
-
 const userScriptUpdatedLabel = computed(() => {
   if (!userScriptUpdatedAt.value) {
     return 'Not synced yet';
@@ -87,27 +59,6 @@ function formatJson(value: Record<string, unknown> | undefined): string {
   }
 
   return JSON.stringify(value, null, 2);
-}
-
-function formatSchema(script: ScriptDefinition): string {
-  return JSON.stringify(
-    {
-      inputSchema: script.inputSchema,
-      outputSchema: script.outputSchema,
-    },
-    null,
-    2,
-  );
-}
-
-function sourceLabel(scriptId: string): string {
-  if (scriptId.startsWith('builtin.')) {
-    return 'Built-in';
-  }
-  if (scriptId.startsWith('local.')) {
-    return 'Local';
-  }
-  return 'Registry';
 }
 
 function isScriptExpanded(localScriptId: string): boolean {
@@ -140,8 +91,6 @@ async function loadHistory(): Promise<void> {
     const stored = await browser.storage.local.get([
       SCRIPT_HISTORY_STORAGE_KEY,
       SCRIPT_HISTORY_UPDATED_AT_STORAGE_KEY,
-      SCRIPT_REGISTRY_STORAGE_KEY,
-      SCRIPT_REGISTRY_UPDATED_AT_STORAGE_KEY,
       USERSCRIPT_REGISTRY_STORAGE_KEY,
       USERSCRIPT_REGISTRY_UPDATED_AT_STORAGE_KEY,
       USERSCRIPT_AVAILABLE_STORAGE_KEY,
@@ -150,19 +99,12 @@ async function loadHistory(): Promise<void> {
     entries.value = Array.isArray(stored[SCRIPT_HISTORY_STORAGE_KEY])
       ? (stored[SCRIPT_HISTORY_STORAGE_KEY] as ScriptExecutionHistoryEntry[])
       : [];
-    scripts.value = Array.isArray(stored[SCRIPT_REGISTRY_STORAGE_KEY])
-      ? (stored[SCRIPT_REGISTRY_STORAGE_KEY] as ScriptDefinition[])
-      : [];
     userScripts.value = Array.isArray(stored[USERSCRIPT_REGISTRY_STORAGE_KEY])
       ? (stored[USERSCRIPT_REGISTRY_STORAGE_KEY] as UserScriptDefinition[])
       : [];
     updatedAt.value =
       typeof stored[SCRIPT_HISTORY_UPDATED_AT_STORAGE_KEY] === 'string'
         ? stored[SCRIPT_HISTORY_UPDATED_AT_STORAGE_KEY]
-        : '';
-    registryUpdatedAt.value =
-      typeof stored[SCRIPT_REGISTRY_UPDATED_AT_STORAGE_KEY] === 'string'
-        ? stored[SCRIPT_REGISTRY_UPDATED_AT_STORAGE_KEY]
         : '';
     userScriptUpdatedAt.value =
       typeof stored[USERSCRIPT_REGISTRY_UPDATED_AT_STORAGE_KEY] === 'string'
@@ -195,21 +137,6 @@ function handleStorageChanged(
   const updatedAtChange = changes[SCRIPT_HISTORY_UPDATED_AT_STORAGE_KEY];
   if (updatedAtChange) {
     updatedAt.value = typeof updatedAtChange.newValue === 'string' ? updatedAtChange.newValue : '';
-  }
-
-  const registryChange = changes[SCRIPT_REGISTRY_STORAGE_KEY];
-  if (registryChange) {
-    scripts.value = Array.isArray(registryChange.newValue)
-      ? (registryChange.newValue as ScriptDefinition[])
-      : [];
-  }
-
-  const registryUpdatedAtChange = changes[SCRIPT_REGISTRY_UPDATED_AT_STORAGE_KEY];
-  if (registryUpdatedAtChange) {
-    registryUpdatedAt.value =
-      typeof registryUpdatedAtChange.newValue === 'string'
-        ? registryUpdatedAtChange.newValue
-        : '';
   }
 
   const userScriptChange = changes[USERSCRIPT_REGISTRY_STORAGE_KEY];
@@ -247,18 +174,11 @@ onBeforeUnmount(() => {
   <main class="app">
     <section class="hero">
       <p class="eyebrow">WEB_CAP</p>
-      <h1>Script Registry</h1>
-      <p class="copy">Browse callable scripts synced from the local runtime.</p>
+      <h1>Script Activity</h1>
+      <p class="copy">Review page userscripts and recent local script runs.</p>
     </section>
 
     <nav class="view-switch" aria-label="Popup views">
-      <button
-        type="button"
-        :class="{ active: activeView === 'registry' }"
-        @click="activeView = 'registry'"
-      >
-        Registered
-      </button>
       <button
         type="button"
         :class="{ active: activeView === 'userscripts' }"
@@ -275,22 +195,7 @@ onBeforeUnmount(() => {
       </button>
     </nav>
 
-    <section v-if="activeView === 'registry'" class="stats registry-stats">
-      <article class="stat-card">
-        <span class="stat-label">Registry</span>
-        <strong>{{ registrySummary.registered }}</strong>
-      </article>
-      <article class="stat-card">
-        <span class="stat-label">Built-in</span>
-        <strong>{{ registrySummary.builtIn }}</strong>
-      </article>
-      <article class="stat-card">
-        <span class="stat-label">Total</span>
-        <strong>{{ registrySummary.total }}</strong>
-      </article>
-    </section>
-
-    <section v-else-if="activeView === 'userscripts'" class="stats">
+    <section v-if="activeView === 'userscripts'" class="stats">
       <article class="stat-card">
         <span class="stat-label">Active</span>
         <strong>{{ userScriptSummary.active }}</strong>
@@ -323,74 +228,12 @@ onBeforeUnmount(() => {
     <section class="meta">
       <span class="meta-label">Last sync</span>
       <span class="meta-value">{{
-        activeView === 'registry'
-          ? registryUpdatedLabel
-          : activeView === 'userscripts'
-            ? userScriptUpdatedLabel
-            : lastUpdatedLabel
+        activeView === 'userscripts' ? userScriptUpdatedLabel : lastUpdatedLabel
       }}</span>
     </section>
 
     <section v-if="isLoading" class="empty-state">
       <p>Loading cached data...</p>
-    </section>
-
-    <section v-else-if="activeView === 'registry'" class="registry-panel">
-      <div class="toolbar">
-        <select v-model="scriptTypeFilter" aria-label="Script type">
-          <option value="all">All types</option>
-          <option value="read">Read</option>
-          <option value="act">Act</option>
-        </select>
-      </div>
-
-      <section v-if="filteredScripts.length === 0" class="empty-state">
-        <p>No registered scripts found.</p>
-        <p class="hint">Connect the local runtime or clear the type filter.</p>
-      </section>
-
-      <section v-else class="registry-list">
-        <article v-for="script in filteredScripts" :key="`${script.id}@${script.version}`" class="script-card">
-          <header class="script-card-header">
-            <div>
-              <p class="script-name">{{ script.name }}</p>
-              <p class="script-id">{{ script.id }}@{{ script.version }}</p>
-            </div>
-            <div class="pill-stack">
-              <span class="status-pill">{{ script.type }}</span>
-              <span class="status-pill" :data-status="script.status">{{ script.status }}</span>
-            </div>
-          </header>
-
-          <p class="script-summary">{{ script.summary }}</p>
-
-          <div class="script-meta-row">
-            <span>{{ sourceLabel(script.id) }}</span>
-            <span>{{ script.target.site }}</span>
-          </div>
-
-          <div v-if="script.tags.length > 0" class="tag-row">
-            <span v-for="tag in script.tags" :key="tag">{{ tag }}</span>
-          </div>
-
-          <div class="script-actions">
-            <button
-              type="button"
-              class="ghost-button"
-              @click="openDialog(`${script.id} · Schema`, formatSchema(script))"
-            >
-              Schema
-            </button>
-            <button
-              type="button"
-              class="ghost-button"
-              @click="openDialog(`${script.id} · Code`, script.script.code)"
-            >
-              Code
-            </button>
-          </div>
-        </article>
-      </section>
     </section>
 
     <section v-else-if="activeView === 'userscripts'" class="registry-panel">
@@ -578,7 +421,7 @@ h1 {
 
 .view-switch {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
   margin-bottom: 12px;
 }
@@ -684,24 +527,6 @@ h1 {
   display: flex;
   flex-direction: column;
   gap: 12px;
-}
-
-.toolbar {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 116px;
-  gap: 8px;
-}
-
-.toolbar input,
-.toolbar select {
-  min-width: 0;
-  border: 1px solid rgba(109, 88, 57, 0.2);
-  border-radius: 8px;
-  padding: 9px 10px;
-  background: rgba(255, 255, 255, 0.8);
-  color: #1f1c17;
-  font: inherit;
-  font-size: 13px;
 }
 
 .registry-list {

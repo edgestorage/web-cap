@@ -400,7 +400,8 @@ function scriptExecutionHelp(): string {
   Runs JavaScript in the selected browser tab. Scripts receive one JSON object,
   return one JSON object, and can use the Playwright-style page API.
 
-  Scripts also receive a Playwright-style page API as global page and cap.page.
+  Scripts also receive a Playwright-style page API as global page and cap.page,
+  plus cap.goto(url, input) for controlled multi-page workflows.
 ${scriptRuntimeApiHelp('  ')}
 
   --script <code>       Script source code to run in the browser tab.
@@ -420,7 +421,8 @@ ${indent}textContent(), first(), nth(), waitFor(), and getByRole()/getByText().
 
 ${indent}Example:
 ${indent}  await page.getByRole('button', { name: 'Login' }).click();
-${indent}  await page.locator('input[name=email]').fill(input.email);`;
+${indent}  await page.locator('input[name=email]').fill(input.email);
+${indent}  return cap.goto('/next-page', { step: 'next' });`;
 }
 
 function createCommandParser(commandName: CliCommandName): Command {
@@ -592,6 +594,7 @@ function parseConfigKeyOption(value: string): WebCapConfigKey {
   if (
     value === 'activateTabOnScriptExecute' ||
     value === 'evidence' ||
+    value === 'executionPageIndicator' ||
     value === 'mouseTrajectorySimulation'
   ) {
     return value;

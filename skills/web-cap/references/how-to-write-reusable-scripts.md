@@ -85,6 +85,51 @@ Execution example:
 web-cap script-execute --tab-id <tab-id> --script-file .web-cap/example.com/read-page-summary.js --input '{"limit":10}'
 ```
 
+## Multi-Page Workflows
+
+Use `cap.goto(url, nextInput)` when a script needs to continue after a full page
+navigation. Web Cap navigates to `url`, waits for the page to load, then reruns
+the same script with `nextInput` as the first `input` argument.
+
+```javascript
+/**
+ * web-cap script
+ *
+ * @description Search a site, open the first result, and read the detail page.
+ * @param {object} input
+ * @param {string} [input.step] Current workflow step.
+ * @param {string} input.query Search query.
+ * @match https://example.com/*
+ */
+export default async function (input = {}) {
+  if (!input.step) {
+    await page.locator("input[name='q']").fill(input.query);
+    await page.getByRole("button", { name: "Search" }).click();
+    return cap.goto(location.href, { step: "results", query: input.query });
+  }
+
+  if (input.step === "results") {
+    const href = await page.locator("a.result").first().getAttribute("href");
+    if (!href) {
+      return { ok: false, error: "No result link found.", url: location.href };
+    }
+    return cap.goto(href, { step: "detail", query: input.query, href });
+  }
+
+  return {
+    ok: true,
+    query: input.query,
+    href: input.href,
+    url: location.href,
+    title: document.title
+  };
+}
+```
+
+Each `nextInput` must be a JSON object and must satisfy the script input schema
+on the next run. Include any original input fields you still need in later
+steps.
+
 ## Page Userscripts
 
 Use `web-cap userscript` files for scripts that should run automatically when

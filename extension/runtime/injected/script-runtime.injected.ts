@@ -9,6 +9,7 @@ import { installManagedClickHook } from './managed-click.injected';
 import { captureVisibleElementsDiff } from './visible-elements.injected';
 
 type RuntimeJsonObject = Record<string, unknown>;
+const WEB_CAP_GOTO_CONTINUATION_TYPE = 'web_cap.goto';
 
 interface RuntimeEvidenceEvent {
   type: string;
@@ -89,6 +90,7 @@ type RuntimeApi = {
   get(scriptId: string): RuntimeJsonObject;
   list(): RuntimeJsonObject[];
   call(scriptId: string, nestedInput?: RuntimeJsonObject): Promise<RuntimeJsonObject>;
+  goto(url: string, input?: RuntimeJsonObject): RuntimeJsonObject;
   page: ScriptPlaywrightPage;
   typeIntoElement(element: unknown, value: unknown): Promise<void>;
   waitForManagedInput(): Promise<void>;
@@ -203,6 +205,40 @@ export async function runScriptRuntime({
     }
 
     throw new Error('Script script must return a JSON object.');
+  }
+
+  function isRuntimeJsonObject(value: unknown): value is RuntimeJsonObject {
+    return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+  }
+
+  function normalizeGotoInput(value: unknown): RuntimeJsonObject {
+    if (value === undefined) {
+      return {};
+    }
+    if (isRuntimeJsonObject(value)) {
+      return value;
+    }
+    throw new Error('cap.goto input must be a JSON object.');
+  }
+
+  function createGotoContinuation(url: unknown, nextInput: unknown = {}): RuntimeJsonObject {
+    if (typeof url !== 'string' || url.trim().length === 0) {
+      throw new Error('cap.goto url must be a non-empty string.');
+    }
+    return {
+      __webCapType: WEB_CAP_GOTO_CONTINUATION_TYPE,
+      url,
+      input: normalizeGotoInput(nextInput),
+    };
+  }
+
+  function isGotoContinuation(value: unknown): value is RuntimeJsonObject {
+    return (
+      isRuntimeJsonObject(value) &&
+      value.__webCapType === WEB_CAP_GOTO_CONTINUATION_TYPE &&
+      typeof value.url === 'string' &&
+      isRuntimeJsonObject(value.input)
+    );
   }
 
   function createEvidence(includeUrl = false): RuntimeEvidence {
@@ -819,6 +855,9 @@ export async function runScriptRuntime({
       async call(scriptId: string, nestedInput: RuntimeJsonObject = {}) {
         return await executeScriptById(scriptId, nestedInput, true);
       },
+      goto(url: string, nextInput: RuntimeJsonObject = {}) {
+        return createGotoContinuation(url, nextInput);
+      },
       page,
       async typeIntoElement(element: unknown, value: unknown) {
         await typeIntoElement(element, value);
@@ -948,6 +987,9 @@ export async function runScriptRuntime({
     }
 
     const output = normalizeResult(result);
+    if (isGotoContinuation(output)) {
+      return output;
+    }
     const outputValidation = validateInputAgainstSchema(output, item.outputSchema);
     if (!outputValidation.ok) {
       throw new Error(
