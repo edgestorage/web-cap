@@ -15,6 +15,12 @@ export interface ScriptExecuteCliOptions {
   pretty?: boolean;
 }
 
+export interface ScriptExecuteRequestReaders {
+  readScriptFile?: (path: string) => Promise<string>;
+  readInputFile?: (path: string) => Promise<string>;
+  readStdin?: () => Promise<string>;
+}
+
 export interface JsonOutputCliOptions {
   pretty?: boolean;
 }
@@ -116,6 +122,7 @@ function parseHelpArgs(args: string[]): CliCommand {
 
 export async function buildScriptExecuteRequest(
   options: ScriptExecuteCliOptions,
+  readers: ScriptExecuteRequestReaders = {},
 ): Promise<ExecuteScriptRequest> {
   if (options.script && options.scriptFile) {
     throw new Error('Use either --script or --script-file, not both.');
@@ -124,8 +131,17 @@ export async function buildScriptExecuteRequest(
     throw new Error('Use either --input or --input-file, not both.');
   }
 
+  const readScriptFile = readers.readScriptFile ?? ((path: string) => readFile(path, 'utf8'));
+  const readInputFile = readers.readInputFile ?? ((path: string) => readFile(path, 'utf8'));
+  const readStdin = readers.readStdin ?? readProcessStdin;
+
   const script =
-    options.script ?? (options.scriptFile ? await readFile(options.scriptFile, 'utf8') : undefined);
+    options.script ??
+    (options.scriptFile
+      ? options.scriptFile === '-'
+        ? await readStdin()
+        : await readScriptFile(options.scriptFile)
+      : undefined);
   if (!script || script.trim().length === 0) {
     throw new Error('script-execute requires --script or --script-file.');
   }
@@ -134,7 +150,7 @@ export async function buildScriptExecuteRequest(
   }
 
   const inputRaw =
-    options.input ?? (options.inputFile ? await readFile(options.inputFile, 'utf8') : '{}');
+    options.input ?? (options.inputFile ? await readInputFile(options.inputFile) : '{}');
   const input = parseJsonObject(inputRaw, 'input');
   const executionOptions: NonNullable<ExecuteScriptRequest['options']> = {
     tabId: options.tabId,
@@ -153,6 +169,20 @@ export async function buildScriptExecuteRequest(
   }
 
   return request;
+}
+
+async function readProcessStdin(): Promise<string> {
+  return await new Promise<string>((resolve, reject) => {
+    let value = '';
+    process.stdin.setEncoding('utf8');
+    process.stdin.on('data', (chunk: string) => {
+      value += chunk;
+    });
+    process.stdin.once('error', reject);
+    process.stdin.once('end', () => {
+      resolve(value);
+    });
+  });
 }
 
 export function usage(): string {
@@ -396,6 +426,7 @@ function scriptExecutionHelp(): string {
   return `Script execution:
   web-cap script-execute --tab-id <id> --script <code> [--input <json>] [--timeout-ms <ms>] [--register]
   web-cap script-execute --tab-id <id> --script-file <path> [--input-file <path>] [--pretty]
+  web-cap script-execute --tab-id <id> --script-file - < script.js
 
   Runs JavaScript in the selected browser tab. Scripts receive one JSON object,
   return one JSON object, and can use the Playwright-style page API.
@@ -405,7 +436,7 @@ function scriptExecutionHelp(): string {
 ${scriptRuntimeApiHelp('  ')}
 
   --script <code>       Script source code to run in the browser tab.
-  --script-file <path>  Read script source code from a file.
+  --script-file <path>  Read script source code from a file, or stdin when path is "-".
   --input <json>        JSON object passed to the script. Defaults to {}.
   --input-file <path>   Read the script input object from a file.
   --tab-id <id>         Required browser tab id to target. Use session-status to find it.

@@ -131,6 +131,35 @@ describe('WEB_CAP CLI', () => {
     });
   });
 
+  it('loads script from stdin when script-file is dash', async () => {
+    const command = parseCliArgs(['script-execute', '--script-file', '-', '--tab-id', '42']);
+
+    expect(command).toEqual({
+      name: 'script-execute',
+      options: {
+        scriptFile: '-',
+        tabId: 42,
+      },
+    });
+
+    if (command.name !== 'script-execute') {
+      throw new Error('Expected script-execute command.');
+    }
+
+    await expect(
+      buildScriptExecuteRequest(command.options, {
+        readStdin: async () =>
+          'export default async function () { return { selector: "a[href*=\\"/post-\\"]" }; }',
+      }),
+    ).resolves.toEqual({
+      script: 'export default async function () { return { selector: "a[href*=\\"/post-\\"]" }; }',
+      input: {},
+      options: {
+        tabId: 42,
+      },
+    });
+  });
+
   it('requires a tab id for script execution', async () => {
     expect(() =>
       parseCliArgs(['script-execute', '--script', 'export default async function () {}']),
