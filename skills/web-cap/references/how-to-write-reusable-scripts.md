@@ -129,29 +129,3 @@ export default async function (input = {}) {
 Each `nextInput` must be a JSON object and must satisfy the script input schema
 on the next run. Include any original input fields you still need in later
 steps.
-
-## Page Userscripts
-
-Use `web-cap userscript` files for scripts that should run automatically when
-matching pages load:
-
-```javascript
-/**
- * web-cap userscript
- *
- * @name Foo
- * @version 1.0.0
- * @match https://example.com/*
- * @runAt document-idle
- */
-console.log("foo");
-```
-
-Install and list page userscripts with:
-
-```bash
-web-cap userscript install --file ./foo.js
-web-cap userscript list
-web-cap userscript show userscript.foo
-web-cap userscript remove userscript.foo
-```
