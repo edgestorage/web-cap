@@ -183,6 +183,8 @@ export default async function (input) {
 
 The runtime injects a Playwright-style `page` helper while the script executes. Common APIs include `page.locator(...)`, `page.getByRole(...)`, `locator.click()`, `locator.fill()`, `locator.textContent()`, and `locator.waitFor()`.
 
+For controlled multi-page scripts, `cap.goto(url, nextInput)` navigates to `url` and reruns the same script with exactly `nextInput` as the next `input`. Page/script state is lost across the navigation, so pass every cross-page field you need, such as `step`, `index`, `urls`, and accumulated `results`, through `nextInput` explicitly.
+
 ## CLI Usage
 
 Run a one-off script:

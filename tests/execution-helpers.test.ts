@@ -850,6 +850,90 @@ export default async function () {
     }
   });
 
+  it('waits for a Playwright-style page function', async () => {
+    const script = scriptDefinitionSchema.parse({
+      id: 'page.waitForFunction',
+      name: 'Page Wait For Function',
+      version: '1.0.0',
+      status: 'active',
+      type: 'read',
+      summary: 'Waits for a page function.',
+      target: {
+        site: 'generic-web',
+        urlPatterns: ['http://*', 'https://*'],
+        pageHints: [],
+      },
+      tags: ['test'],
+      inputSchema: {
+        type: 'object',
+        properties: {},
+        required: [],
+        additionalProperties: false,
+      },
+      outputSchema: {
+        type: 'object',
+        properties: {
+          ok: { type: 'boolean' },
+          functionValue: { type: 'string' },
+          stringValue: { type: 'string' },
+          timeoutMessage: { type: 'string' },
+        },
+        required: ['ok', 'functionValue', 'stringValue', 'timeoutMessage'],
+        additionalProperties: false,
+      },
+      script: {
+        timeoutMs: 1_000,
+        code: `
+export default async function () {
+  globalThis.__webCapWaitFunctionValue = 'pending';
+  globalThis.__webCapWaitStringValue = 'pending';
+  setTimeout(() => { globalThis.__webCapWaitFunctionValue = 'ready'; }, 10);
+  setTimeout(() => { globalThis.__webCapWaitStringValue = 'ready'; }, 10);
+
+  await page.waitForFunction(
+    (expected) => globalThis.__webCapWaitFunctionValue === expected,
+    'ready',
+    { timeout: 200, polling: 5 },
+  );
+  const stringValue = await page.waitForFunction(
+    'globalThis.__webCapWaitStringValue === "ready" ? globalThis.__webCapWaitStringValue : false',
+    undefined,
+    { timeout: 200, polling: 'raf' },
+  );
+
+  let timeoutMessage = '';
+  try {
+    await page.waitForFunction(() => false, undefined, { timeout: 20, polling: 5 });
+  } catch (error) {
+    timeoutMessage = error instanceof Error ? error.message : String(error);
+  }
+
+  return {
+    ok: true,
+    functionValue: globalThis.__webCapWaitFunctionValue,
+    stringValue,
+    timeoutMessage,
+  };
+}
+        `.trim(),
+      },
+    });
+
+    const expression = buildScriptExecutionExpression(script, {}, [], { evidence: ['events'] });
+    const response = (await eval(expression)) as {
+      ok: boolean;
+      result?: Record<string, unknown>;
+    };
+
+    expect(response.ok).toBe(true);
+    expect(response.result).toEqual({
+      ok: true,
+      functionValue: 'ready',
+      stringValue: 'ready',
+      timeoutMessage: 'Timed out after 20ms waiting for page.waitForFunction.',
+    });
+  });
+
   it('routes user script setTimeout through the managed timer bridge when provided', async () => {
     const originalSetTimeout = globalThis.setTimeout;
     const originalClearTimeout = globalThis.clearTimeout;

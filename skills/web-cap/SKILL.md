@@ -91,6 +91,7 @@ Write `script-execute` scripts as small browser functions with clear boundaries:
 - Use waits sparingly and expose timing through result fields when it affects reliability.
 - For destructive actions, return a preview plan first unless the user explicitly asked to perform the action.
 - For controlled multi-page workflows, return `cap.goto(url, nextInput)`. Web Cap navigates to `url`, then reruns the same script with `nextInput` as `input`.
+- Page/script state is lost after a `cap.goto` navigation. Manage all post-goto state yourself through `input`; Web Cap does not merge previous input, increment indexes, advance pages, or remember progress automatically.
 
 Example one-off read:
 
@@ -127,6 +128,8 @@ export default async function (input) {
 ```
 
 Example controlled multi-page workflow:
+
+`cap.goto(url, nextInput)` is a continuation. After the page changes, the same script runs again with exactly `nextInput` as `input`. Carry every cross-page field you need, such as `step`, `index`, `urls`, and accumulated `results`.
 
 ```javascript
 export default async function (input = {}) {

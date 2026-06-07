@@ -29,6 +29,18 @@ function serializeUrlMatcher(matcher: unknown) {
   return {};
 }
 
+function pollingMsFromOptions(options: unknown) {
+  if (!options || typeof options !== 'object' || !('polling' in options)) {
+    return 100;
+  }
+  const polling = (options as { polling?: unknown }).polling;
+  if (polling === 'raf') {
+    return 16;
+  }
+  const pollingMs = Number(polling);
+  return Math.max(Number.isFinite(pollingMs) ? pollingMs : 100, 0);
+}
+
 function frameDocument(frameElement: HTMLIFrameElement | null) {
   return frameElement ? frameElement.contentDocument : document;
 }
@@ -134,6 +146,7 @@ const PLAYWRIGHT_PAGE_METHODS = [
   'video',
   'viewportSize',
   'waitForEvent',
+  'waitForFunction',
   'waitForLoadState',
   'waitForNavigation',
   'waitForRequest',
@@ -729,6 +742,24 @@ function createPageApi(): ScriptPlaywrightPage {
         return (0, eval)(pageFunction);
       }
       throw new Error('page.evaluate requires a function or string expression.');
+    },
+    async waitForFunction(pageFunction: unknown, arg?: unknown, options: { timeout?: number; polling?: number | 'raf' } = {}) {
+      if (typeof pageFunction !== 'function' && typeof pageFunction !== 'string') {
+        throw new Error('page.waitForFunction requires a function or string expression.');
+      }
+      const timeout = timeoutFromOptions(options, defaultTimeoutMs);
+      const pollingMs = pollingMsFromOptions(options);
+      const startedAt = Date.now();
+      while (Date.now() - startedAt <= timeout) {
+        const value = typeof pageFunction === 'function'
+          ? await Promise.resolve(pageFunction(arg))
+          : await Promise.resolve((0, eval)(pageFunction));
+        if (value) {
+          return value;
+        }
+        await deps.wait(pollingMs);
+      }
+      throw new Error(`Timed out after ${timeout}ms waiting for page.waitForFunction.`);
     },
     async waitForSelector(selector: unknown, options: { state?: 'attached' | 'detached' | 'visible' | 'hidden'; timeout?: number } = {}) {
       return await waitForLocator(() => queryLocatorSelectorAll(String(selector)), `page.waitForSelector(${String(selector)})`, deps.wait, { timeout: defaultTimeoutMs, ...options });
