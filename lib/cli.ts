@@ -3,6 +3,7 @@
 import { readFileSync, realpathSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { MatchPattern } from '@webext-core/match-patterns';
 import {
   buildScriptExecuteRequest,
   parseCliArgs,
@@ -17,6 +18,7 @@ import {
 } from './config';
 import { connectToDaemon } from './daemon-client';
 import type { ExecuteScriptRequest, WebCapAgentService } from './server/agent/contracts';
+import type { UserScriptDefinition } from '@shared/script-schema';
 import { executeCoreTool, type CoreToolName } from './server/tool-contracts';
 import { runMcpServer } from './mcp-server';
 
@@ -137,7 +139,33 @@ async function handleUserScriptCommand(
       return script;
     }
     case 'list':
-      return { userscripts: await app.userScriptList() };
+      return { userscripts: filterUserScripts(await app.userScriptList(), options) };
+  }
+}
+
+function filterUserScripts(
+  userscripts: UserScriptDefinition[],
+  options: Extract<CliCommand, { name: 'userscript' }>['options'],
+): UserScriptDefinition[] {
+  return userscripts.filter((script) => {
+    if (options.id && script.id !== options.id && !script.id.startsWith(options.id)) {
+      return false;
+    }
+    if (options.status && script.status !== options.status) {
+      return false;
+    }
+    if (options.matchUrl && !script.matches.some((pattern) => matchPatternIncludesUrl(pattern, options.matchUrl!))) {
+      return false;
+    }
+    return true;
+  });
+}
+
+function matchPatternIncludesUrl(pattern: string, url: string): boolean {
+  try {
+    return new MatchPattern(pattern).includes(url);
+  } catch {
+    return false;
   }
 }
 

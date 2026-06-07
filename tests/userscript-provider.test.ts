@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -11,6 +11,7 @@ import {
 const validUserScript = `/**
  * web-cap userscript
  *
+ * @id com.example.foo
  * @name Foo
  * @version 1.0.0
  * @match https://example.com/*
@@ -19,6 +20,7 @@ const validUserScript = `/**
  */
 console.log('foo');
 `;
+const userScriptWithoutId = validUserScript.replace(' * @id com.example.foo\n', '');
 
 describe('userscript provider', () => {
   let tempDir = '';
@@ -37,13 +39,17 @@ describe('userscript provider', () => {
     });
 
     expect(definition).toMatchObject({
-      id: 'userscript.foo',
+      id: 'com.example.foo',
       name: 'Foo',
       version: '1.0.0',
       matches: ['https://example.com/*', 'https://docs.example.com/*'],
       runAt: 'document-idle',
       status: 'active',
     });
+  });
+
+  it('rejects userscripts without @id', () => {
+    expect(() => parseUserScriptDefinition(userScriptWithoutId)).toThrow(/requires @id/);
   });
 
   it('parses disabled userscript status from metadata', () => {
@@ -60,11 +66,27 @@ describe('userscript provider', () => {
       parseUserScriptDefinition(`/**
  * web-cap userscript
  *
+ * @id com.example.foo
  * @name Foo
  */
 console.log('foo');
 `),
     ).toThrow(/@match/);
+  });
+
+  it('rejects invalid explicit userscript ids', () => {
+    expect(() =>
+      parseUserScriptDefinition(validUserScript.replace(
+        ' * @id com.example.foo',
+        ' * @id Userscript Foo',
+      )),
+    ).toThrow(/Invalid @id/);
+    expect(() =>
+      parseUserScriptDefinition(validUserScript.replace(
+        ' * @id com.example.foo',
+        ' * @id foo',
+      )),
+    ).toThrow(/Invalid @id/);
   });
 
   it('validates Chrome-style match patterns', () => {
@@ -86,11 +108,44 @@ console.log('foo');
 
     const provider = new FileUserScriptProvider(tempDir);
     const installed = await provider.install({ filePath: sourceFile });
-    const storedSource = await readFile(join(tempDir, 'userscripts', 'userscript.foo.js'), 'utf8');
+    const storedSource = await readFile(join(tempDir, 'userscripts', 'com.example.foo.js'), 'utf8');
 
-    expect(installed.sourcePath).toBe(join(tempDir, 'userscripts', 'userscript.foo.js'));
+    expect(installed.sourcePath).toBe(join(tempDir, 'userscripts', 'com.example.foo.js'));
     expect(storedSource).toContain('web-cap userscript');
     await expect(provider.list()).resolves.toHaveLength(1);
+  });
+
+  it('requires explicit ids for newly installed userscripts', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'web-cap-userscript-test-'));
+    const sourceFile = join(tempDir, 'foo.js');
+    await writeFile(sourceFile, userScriptWithoutId, 'utf8');
+
+    const provider = new FileUserScriptProvider(tempDir);
+    await expect(provider.install({ filePath: sourceFile })).rejects.toThrow(/requires @id/);
+  });
+
+  it('fails when loading old managed userscripts without @id', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'web-cap-userscript-test-'));
+    const legacyFile = join(tempDir, 'userscripts', 'userscript.foo.js');
+    await mkdir(join(tempDir, 'userscripts'), { recursive: true });
+    await writeFile(legacyFile, userScriptWithoutId, 'utf8');
+
+    const provider = new FileUserScriptProvider(tempDir);
+    await expect(provider.list()).rejects.toThrow(/requires @id/);
+  });
+
+  it('installs userscripts under their dotted id', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'web-cap-userscript-test-'));
+    const sourceFile = join(tempDir, 'foo.js');
+    await writeFile(sourceFile, validUserScript, 'utf8');
+
+    const provider = new FileUserScriptProvider(tempDir);
+    const installed = await provider.install({ filePath: sourceFile });
+    const storedSource = await readFile(join(tempDir, 'userscripts', 'com.example.foo.js'), 'utf8');
+
+    expect(installed.id).toBe('com.example.foo');
+    expect(installed.sourcePath).toBe(join(tempDir, 'userscripts', 'com.example.foo.js'));
+    expect(storedSource).toContain('@id com.example.foo');
   });
 
   it('installs userscripts from source content', async () => {
@@ -101,9 +156,9 @@ console.log('foo');
       source: validUserScript,
       sourcePath: '<stdin>',
     });
-    const storedSource = await readFile(join(tempDir, 'userscripts', 'userscript.foo.js'), 'utf8');
+    const storedSource = await readFile(join(tempDir, 'userscripts', 'com.example.foo.js'), 'utf8');
 
-    expect(installed.sourcePath).toBe(join(tempDir, 'userscripts', 'userscript.foo.js'));
+    expect(installed.sourcePath).toBe(join(tempDir, 'userscripts', 'com.example.foo.js'));
     expect(storedSource).toContain('web-cap userscript');
     await expect(provider.list()).resolves.toHaveLength(1);
   });
@@ -115,9 +170,9 @@ console.log('foo');
 
     const provider = new FileUserScriptProvider(tempDir);
     await provider.install({ filePath: sourceFile });
-    const removed = await provider.remove('userscript.foo');
+    const removed = await provider.remove('com.example.foo');
 
-    expect(removed.id).toBe('userscript.foo');
+    expect(removed.id).toBe('com.example.foo');
     await expect(provider.list()).resolves.toHaveLength(0);
   });
 
@@ -128,14 +183,14 @@ console.log('foo');
 
     const provider = new FileUserScriptProvider(tempDir);
     await provider.install({ filePath: sourceFile });
-    const disabled = await provider.setStatus('userscript.foo', 'disabled');
-    const storedSource = await readFile(join(tempDir, 'userscripts', 'userscript.foo.js'), 'utf8');
+    const disabled = await provider.setStatus('com.example.foo', 'disabled');
+    const storedSource = await readFile(join(tempDir, 'userscripts', 'com.example.foo.js'), 'utf8');
 
     expect(disabled.status).toBe('disabled');
     expect(storedSource).toContain('@status disabled');
     await expect(provider.list()).resolves.toMatchObject([{ status: 'disabled' }]);
 
-    const enabled = await provider.setStatus('userscript.foo', 'active');
+    const enabled = await provider.setStatus('com.example.foo', 'active');
     expect(enabled.status).toBe('active');
     await expect(provider.list()).resolves.toMatchObject([{ status: 'active' }]);
   });

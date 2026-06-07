@@ -53,6 +53,8 @@ export interface UserScriptCliOptions extends JsonOutputCliOptions {
   action: 'install' | 'list' | 'remove' | 'show' | 'enable' | 'disable';
   file?: string;
   id?: string;
+  matchUrl?: string;
+  status?: 'active' | 'disabled';
   applyNow?: boolean;
 }
 
@@ -275,7 +277,14 @@ function parseConfigArgs(args: string[]): CliCommand {
 
 function parseUserScriptArgs(args: string[]): CliCommand {
   const command = createUserScriptParser();
-  const options = parseCommander<{ file?: string; pretty?: boolean; applyNow?: boolean }>(
+  const options = parseCommander<{
+    file?: string;
+    id?: string;
+    matchUrl?: string;
+    pretty?: boolean;
+    status?: 'active' | 'disabled';
+    applyNow?: boolean;
+  }>(
     command,
     args,
   );
@@ -298,8 +307,18 @@ function parseUserScriptArgs(args: string[]): CliCommand {
       if (options.applyNow) {
         throw new Error('userscript list does not accept --apply-now.');
       }
-      return { name: 'userscript', options: { action: 'list', pretty: options.pretty } };
+      return {
+        name: 'userscript',
+        options: {
+          action: 'list',
+          id: options.id,
+          matchUrl: options.matchUrl,
+          status: options.status,
+          pretty: options.pretty,
+        },
+      };
     case 'install':
+      rejectUserScriptListFilters(options, action);
       if (id) {
         throw new Error('userscript install does not accept an id argument.');
       }
@@ -316,6 +335,7 @@ function parseUserScriptArgs(args: string[]): CliCommand {
         },
       };
     case 'enable':
+      rejectUserScriptListFilters(options, action);
       if (options.file) {
         throw new Error(`userscript ${action} does not accept --file.`);
       }
@@ -332,6 +352,7 @@ function parseUserScriptArgs(args: string[]): CliCommand {
         },
       };
     case 'disable':
+      rejectUserScriptListFilters(options, action);
       if (options.file) {
         throw new Error('userscript disable does not accept --file.');
       }
@@ -350,6 +371,7 @@ function parseUserScriptArgs(args: string[]): CliCommand {
         },
       };
     case 'remove':
+      rejectUserScriptListFilters(options, action);
       if (options.applyNow) {
         throw new Error('userscript remove does not accept --apply-now.');
       }
@@ -368,6 +390,7 @@ function parseUserScriptArgs(args: string[]): CliCommand {
         },
       };
     case 'show':
+      rejectUserScriptListFilters(options, action);
       if (options.applyNow) {
         throw new Error('userscript show does not accept --apply-now.');
       }
@@ -387,6 +410,21 @@ function parseUserScriptArgs(args: string[]): CliCommand {
       };
     default:
       throw new Error(`Unknown userscript action: ${action}`);
+  }
+}
+
+function rejectUserScriptListFilters(
+  options: { id?: string; matchUrl?: string; status?: 'active' | 'disabled' },
+  action: string,
+): void {
+  if (options.id) {
+    throw new Error(`userscript ${action} does not accept --id.`);
+  }
+  if (options.matchUrl) {
+    throw new Error(`userscript ${action} does not accept --match-url.`);
+  }
+  if (options.status) {
+    throw new Error(`userscript ${action} does not accept --status.`);
   }
 }
 
@@ -546,6 +584,9 @@ function createUserScriptParser(): Command {
     .argument('[action]')
     .argument('[id]')
     .option('--file <path>', 'JSDoc-style web-cap userscript file to install, or stdin when path is "-".')
+    .option('--id <id-or-prefix>', 'Filter userscript list by id or id prefix.')
+    .option('--match-url <url>', 'Filter userscript list to scripts whose @match patterns include this URL.')
+    .option('--status <active|disabled>', 'Filter userscript list by status.', parseUserScriptStatusOption)
     .option('--apply-now', 'Immediately run the installed or enabled userscript on matching open tabs.')
     .option('--pretty', 'Print formatted JSON output.');
 }
@@ -708,6 +749,13 @@ function parseIntegerOption(value: string): number {
 function parseScreenshotTypeOption(value: string): 'png' | 'jpeg' {
   if (value !== 'png' && value !== 'jpeg') {
     throw new InvalidArgumentError('Expected png or jpeg.');
+  }
+  return value;
+}
+
+function parseUserScriptStatusOption(value: string): 'active' | 'disabled' {
+  if (value !== 'active' && value !== 'disabled') {
+    throw new InvalidArgumentError('Expected active or disabled.');
   }
   return value;
 }

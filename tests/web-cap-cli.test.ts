@@ -316,6 +316,24 @@ describe('WEB_CAP CLI', () => {
         pretty: true,
       },
     });
+    expect(parseCliArgs([
+      'userscript',
+      'list',
+      '--id',
+      'com.example',
+      '--match-url',
+      'https://example.com/docs/page',
+      '--status',
+      'active',
+    ])).toEqual({
+      name: 'userscript',
+      options: {
+        action: 'list',
+        id: 'com.example',
+        matchUrl: 'https://example.com/docs/page',
+        status: 'active',
+      },
+    });
     expect(parseCliArgs(['userscript', 'install', '--file', './foo.js', '--apply-now'])).toEqual({
       name: 'userscript',
       options: {
@@ -324,41 +342,43 @@ describe('WEB_CAP CLI', () => {
         applyNow: true,
       },
     });
-    expect(parseCliArgs(['userscript', 'enable', 'userscript.foo', '--apply-now'])).toEqual({
+    expect(parseCliArgs(['userscript', 'enable', 'com.example.foo', '--apply-now'])).toEqual({
       name: 'userscript',
       options: {
         action: 'enable',
-        id: 'userscript.foo',
+        id: 'com.example.foo',
         applyNow: true,
       },
     });
-    expect(parseCliArgs(['userscript', 'disable', 'userscript.foo'])).toEqual({
+    expect(parseCliArgs(['userscript', 'disable', 'com.example.foo'])).toEqual({
       name: 'userscript',
       options: {
         action: 'disable',
-        id: 'userscript.foo',
+        id: 'com.example.foo',
       },
     });
-    expect(parseCliArgs(['userscript', 'remove', 'userscript.foo'])).toEqual({
+    expect(parseCliArgs(['userscript', 'remove', 'com.example.foo'])).toEqual({
       name: 'userscript',
       options: {
         action: 'remove',
-        id: 'userscript.foo',
+        id: 'com.example.foo',
       },
     });
-    expect(parseCliArgs(['userscript', 'show', 'userscript.foo', '--pretty'])).toEqual({
+    expect(parseCliArgs(['userscript', 'show', 'com.example.foo', '--pretty'])).toEqual({
       name: 'userscript',
       options: {
         action: 'show',
-        id: 'userscript.foo',
+        id: 'com.example.foo',
         pretty: true,
       },
     });
     expect(() => parseCliArgs(['userscript', 'install'])).toThrow(/--file/);
     expect(() => parseCliArgs(['userscript', 'enable'])).toThrow(/requires an id/);
-    expect(() => parseCliArgs(['userscript', 'disable', 'userscript.foo', '--apply-now'])).toThrow(/--apply-now/);
+    expect(() => parseCliArgs(['userscript', 'disable', 'com.example.foo', '--apply-now'])).toThrow(/--apply-now/);
     expect(() => parseCliArgs(['userscript', 'remove'])).toThrow(/requires an id/);
     expect(() => parseCliArgs(['userscript', 'show'])).toThrow(/requires an id/);
+    expect(() => parseCliArgs(['userscript', 'install', '--file', './foo.js', '--id', 'com.example.foo'])).toThrow(/--id/);
+    expect(() => parseCliArgs(['userscript', 'show', 'com.example.foo', '--match-url', 'https://example.com/'])).toThrow(/--match-url/);
   });
 
   it('prints top-level help with expanded script-execute guidance only', async () => {
@@ -524,7 +544,7 @@ describe('WEB_CAP CLI', () => {
       async userScriptInstall(request) {
         calls.push(`install:${request.filePath}:${request.applyNow === true}`);
         return {
-          id: 'userscript.foo',
+          id: 'com.example.foo',
           name: 'Foo',
           version: '1.0.0',
           status: 'active',
@@ -540,7 +560,7 @@ describe('WEB_CAP CLI', () => {
         calls.push('list');
         return [
           {
-            id: 'userscript.foo',
+            id: 'com.example.foo',
             name: 'Foo',
             version: '1.0.0',
             status: 'active',
@@ -617,11 +637,11 @@ describe('WEB_CAP CLI', () => {
 
     expect(code).toBe(0);
     expect(stderr).toBe('');
-    expect(JSON.parse(stdout)).toMatchObject({ id: 'userscript.foo' });
+    expect(JSON.parse(stdout)).toMatchObject({ id: 'com.example.foo' });
 
     stdout = '';
     code = await runCli(
-      ['userscript', 'enable', 'userscript.foo', '--apply-now'],
+      ['userscript', 'enable', 'com.example.foo', '--apply-now'],
       {
         stdout: { write: (chunk: string) => { stdout += chunk; return true; } },
         stderr: { write: (chunk: string) => { stderr += chunk; return true; } },
@@ -630,11 +650,11 @@ describe('WEB_CAP CLI', () => {
     );
 
     expect(code).toBe(0);
-    expect(JSON.parse(stdout)).toMatchObject({ id: 'userscript.foo', status: 'active' });
+    expect(JSON.parse(stdout)).toMatchObject({ id: 'com.example.foo', status: 'active' });
 
     stdout = '';
     code = await runCli(
-      ['userscript', 'disable', 'userscript.foo'],
+      ['userscript', 'disable', 'com.example.foo'],
       {
         stdout: { write: (chunk: string) => { stdout += chunk; return true; } },
         stderr: { write: (chunk: string) => { stderr += chunk; return true; } },
@@ -643,7 +663,7 @@ describe('WEB_CAP CLI', () => {
     );
 
     expect(code).toBe(0);
-    expect(JSON.parse(stdout)).toMatchObject({ id: 'userscript.foo', status: 'disabled' });
+    expect(JSON.parse(stdout)).toMatchObject({ id: 'com.example.foo', status: 'disabled' });
 
     stdout = '';
     code = await runCli(
@@ -657,12 +677,12 @@ describe('WEB_CAP CLI', () => {
 
     expect(code).toBe(0);
     expect(JSON.parse(stdout)).toMatchObject({
-      userscripts: [{ id: 'userscript.foo' }],
+      userscripts: [{ id: 'com.example.foo' }],
     });
 
     stdout = '';
     code = await runCli(
-      ['userscript', 'show', 'userscript.foo'],
+      ['userscript', 'show', 'com.example.foo'],
       {
         stdout: { write: (chunk: string) => { stdout += chunk; return true; } },
         stderr: { write: (chunk: string) => { stderr += chunk; return true; } },
@@ -671,11 +691,11 @@ describe('WEB_CAP CLI', () => {
     );
 
     expect(code).toBe(0);
-    expect(JSON.parse(stdout)).toMatchObject({ id: 'userscript.foo' });
+    expect(JSON.parse(stdout)).toMatchObject({ id: 'com.example.foo' });
 
     stdout = '';
     code = await runCli(
-      ['userscript', 'remove', 'userscript.foo'],
+      ['userscript', 'remove', 'com.example.foo'],
       {
         stdout: { write: (chunk: string) => { stdout += chunk; return true; } },
         stderr: { write: (chunk: string) => { stderr += chunk; return true; } },
@@ -684,15 +704,95 @@ describe('WEB_CAP CLI', () => {
     );
 
     expect(code).toBe(0);
-    expect(JSON.parse(stdout)).toMatchObject({ id: 'userscript.foo' });
+    expect(JSON.parse(stdout)).toMatchObject({ id: 'com.example.foo' });
     expect(calls).toEqual([
       `install:${resolve('./foo.js')}:true`,
-      'enable:userscript.foo:true',
-      'disable:userscript.foo',
+      'enable:com.example.foo:true',
+      'disable:com.example.foo',
       'list',
       'list',
-      'remove:userscript.foo',
+      'remove:com.example.foo',
     ]);
+  });
+
+  it('filters userscript list output', async () => {
+    const service = createService({
+      async userScriptList() {
+        return [
+          {
+            id: 'com.example.docs',
+            name: 'Example Docs',
+            version: '1.0.0',
+            status: 'active',
+            matches: ['https://example.com/docs/*'],
+            runAt: 'document-idle',
+            code: 'console.log("docs");',
+            installedAt: '2026-06-04T00:00:00.000Z',
+            updatedAt: '2026-06-04T00:00:00.000Z',
+          },
+          {
+            id: 'com.example.shop',
+            name: 'Example Shop',
+            version: '1.0.0',
+            status: 'disabled',
+            matches: ['https://example.com/shop/*'],
+            runAt: 'document-idle',
+            code: 'console.log("shop");',
+            installedAt: '2026-06-04T00:00:00.000Z',
+            updatedAt: '2026-06-04T00:00:00.000Z',
+          },
+          {
+            id: 'org.other.docs',
+            name: 'Other Docs',
+            version: '1.0.0',
+            status: 'active',
+            matches: ['https://other.example/docs/*'],
+            runAt: 'document-idle',
+            code: 'console.log("other");',
+            installedAt: '2026-06-04T00:00:00.000Z',
+            updatedAt: '2026-06-04T00:00:00.000Z',
+          },
+        ];
+      },
+      sessionStatus() {
+        return {
+          connected: true,
+          tabs: [],
+          authenticatedSites: [],
+          userScriptsAvailable: true,
+        };
+      },
+    });
+    let stdout = '';
+    let stderr = '';
+
+    const code = await runCli(
+      [
+        'userscript',
+        'list',
+        '--id',
+        'com.example',
+        '--status',
+        'active',
+        '--match-url',
+        'https://example.com/docs/getting-started',
+      ],
+      {
+        stdout: { write: (chunk: string) => { stdout += chunk; return true; } },
+        stderr: { write: (chunk: string) => { stderr += chunk; return true; } },
+      },
+      async () => service,
+    );
+
+    expect(code).toBe(0);
+    expect(stderr).toBe('');
+    expect(JSON.parse(stdout)).toEqual({
+      userscripts: [
+        expect.objectContaining({
+          id: 'com.example.docs',
+        }),
+      ],
+    });
   });
 
   it('loads userscript source from stdin when file is dash', async () => {
@@ -703,7 +803,7 @@ describe('WEB_CAP CLI', () => {
           `install:${request.sourcePath}:${request.source?.includes('web-cap userscript')}:${request.applyNow === true}`,
         );
         return {
-          id: 'userscript.stdin',
+          id: 'com.example.stdin',
           name: 'From stdin',
           version: '1.0.0',
           status: 'active',
@@ -730,7 +830,7 @@ describe('WEB_CAP CLI', () => {
     const code = await runCli(
       ['userscript', 'install', '--file', '-', '--apply-now'],
       {
-        stdin: Readable.from(['/**\n * web-cap userscript\n * @name From stdin\n * @match https://example.com/*\n */\nconsole.log("ok");\n']),
+        stdin: Readable.from(['/**\n * web-cap userscript\n * @id com.example.stdin\n * @name From stdin\n * @match https://example.com/*\n */\nconsole.log("ok");\n']),
         stdout: { write: (chunk: string) => { stdout += chunk; return true; } },
         stderr: { write: (chunk: string) => { stderr += chunk; return true; } },
       },
@@ -739,7 +839,7 @@ describe('WEB_CAP CLI', () => {
 
     expect(code).toBe(0);
     expect(stderr).toBe('');
-    expect(JSON.parse(stdout)).toMatchObject({ id: 'userscript.stdin' });
+    expect(JSON.parse(stdout)).toMatchObject({ id: 'com.example.stdin' });
     expect(calls).toEqual(['install:<stdin>:true:true']);
   });
 

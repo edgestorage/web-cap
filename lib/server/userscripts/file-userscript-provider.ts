@@ -63,17 +63,13 @@ export class FileUserScriptProvider implements UserScriptProvider {
     const files = await this.findUserScriptFiles();
     const definitions: UserScriptDefinition[] = [];
     for (const file of files) {
-      try {
-        const source = await readFile(file, 'utf8');
-        const fileStat = await stat(file);
-        definitions.push(parseUserScriptDefinition(source, {
-          sourcePath: file,
-          installedAt: fileStat.birthtime.toISOString(),
-          updatedAt: fileStat.mtime.toISOString(),
-        }));
-      } catch {
-        // Ignore files that are not valid managed userscripts.
-      }
+      const source = await readFile(file, 'utf8');
+      const fileStat = await stat(file);
+      definitions.push(parseUserScriptDefinition(source, {
+        sourcePath: file,
+        installedAt: fileStat.birthtime.toISOString(),
+        updatedAt: fileStat.mtime.toISOString(),
+      }));
     }
     return definitions.sort((a, b) => a.name.localeCompare(b.name));
   }
@@ -101,7 +97,6 @@ export class FileUserScriptProvider implements UserScriptProvider {
     await rename(tempPath, existing.sourcePath);
 
     return parseUserScriptDefinition(updatedSource, {
-      id,
       sourcePath: existing.sourcePath,
       installedAt: existing.installedAt,
       updatedAt: new Date().toISOString(),
@@ -113,7 +108,7 @@ export class FileUserScriptProvider implements UserScriptProvider {
   }
 
   private pathForDefinition(definition: UserScriptDefinition): string {
-    return join(this.userscriptsDir, `${sanitizePathSegment(definition.id)}.js`);
+    return join(this.userscriptsDir, `${definition.id}.js`);
   }
 
   private async findUserScriptFiles(): Promise<string[]> {
@@ -131,10 +126,6 @@ export class FileUserScriptProvider implements UserScriptProvider {
       throw error;
     }
   }
-}
-
-function sanitizePathSegment(value: string): string {
-  return value.replace(/[^a-zA-Z0-9._-]+/g, '_') || 'userscript';
 }
 
 function setUserScriptStatusInSource(source: string, status: UserScriptStatus): string {

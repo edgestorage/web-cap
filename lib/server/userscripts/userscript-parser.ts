@@ -16,6 +16,7 @@ const VALID_RUN_AT = new Set<UserScriptRunAt>([
 ]);
 
 interface ParsedUserScriptHeader {
+  id: string;
   name: string;
   version: string;
   matches: string[];
@@ -24,7 +25,6 @@ interface ParsedUserScriptHeader {
 }
 
 export interface ParseUserScriptOptions {
-  id?: string;
   sourcePath?: string;
   installedAt?: string;
   updatedAt?: string;
@@ -37,7 +37,7 @@ export function parseUserScriptDefinition(
   const header = parseUserScriptHeader(source);
   const now = new Date().toISOString();
   return userScriptDefinitionSchema.parse({
-    id: options.id ?? buildUserScriptId(header.name),
+    id: header.id,
     name: header.name,
     version: header.version,
     status: header.status,
@@ -76,6 +76,11 @@ export function parseUserScriptHeader(source: string): ParsedUserScriptHeader {
   if (!name) {
     throw new Error('User script metadata requires @name.');
   }
+  const id = readSingleField(fields, 'id')?.trim();
+  if (!id) {
+    throw new Error('User script metadata requires @id.');
+  }
+  validateUserScriptId(id);
 
   const matches = readRepeatedValues(fields, 'match');
   if (matches.length === 0) {
@@ -98,6 +103,7 @@ export function parseUserScriptHeader(source: string): ParsedUserScriptHeader {
   }
 
   return {
+    id,
     name,
     version: readSingleField(fields, 'version') || DEFAULT_USER_SCRIPT_VERSION,
     matches,
@@ -106,8 +112,12 @@ export function parseUserScriptHeader(source: string): ParsedUserScriptHeader {
   };
 }
 
-export function buildUserScriptId(name: string): string {
-  return `userscript.${sanitizeIdSegment(name)}`;
+export function validateUserScriptId(id: string): void {
+  if (!/^[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)+$/.test(id)) {
+    throw new Error(
+      `Invalid @id "${id}". Expected a lowercase dotted id such as com.nodeseek.example.`,
+    );
+  }
 }
 
 export function validateMatchPattern(pattern: string): void {
@@ -170,12 +180,4 @@ function readRepeatedValues(fields: Map<string, string[]>, key: string): string[
     .flatMap((value) => value.split(','))
     .map((value) => value.trim())
     .filter((value, index, values) => value.length > 0 && values.indexOf(value) === index);
-}
-
-function sanitizeIdSegment(value: string): string {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9._-]+/g, '.')
-    .replace(/^\.+|\.+$/g, '') || 'unnamed';
 }

@@ -223,6 +223,7 @@ matching pages load:
 /**
  * web-cap userscript
  *
+ * @id com.example.foo
  * @name Foo
  * @version 1.0.0
  * @match https://example.com/*
@@ -231,14 +232,32 @@ matching pages load:
 console.log("foo");
 ```
 
+Userscript metadata fields:
+
+- `@id`: Required stable identity for the userscript. Use a lowercase dotted id
+  that names the site and purpose, such as `com.example.hide-ads`. Keep it
+  unchanged when updating the same script. Changing `@id` creates a separate
+  userscript instead of overwriting the old one; remove the old id first when
+  replacing it.
+- `@name`: Human-readable display name.
+- `@version`: Script version for tracking installed revisions. Increase it when
+  behavior changes.
+- `@match`: Page scope using WebExtensions/Chrome match pattern syntax, for
+  example `https://example.com/*` or `*://*.example.com/docs/*`.
+- `@runAt`: Injection timing using WebExtensions userscript timing values:
+  `document-start`, `document-end`, or `document-idle`.
+
 Install and manage page userscripts with:
 
 ```bash
 web-cap userscript install --file ./foo.js
 web-cap userscript install --file - < foo.js
 web-cap userscript list
-web-cap userscript show userscript.foo
-web-cap userscript enable userscript.foo --apply-now
-web-cap userscript disable userscript.foo
-web-cap userscript remove userscript.foo
+web-cap userscript list --id com.example
+web-cap userscript list --match-url https://example.com/page
+web-cap userscript list --status active
+web-cap userscript show com.example.foo
+web-cap userscript enable com.example.foo --apply-now
+web-cap userscript disable com.example.foo
+web-cap userscript remove com.example.foo
 ```
