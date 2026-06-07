@@ -215,6 +215,116 @@ const buildResult = (value) => ({ ok: true, value });
       ok: true,
       value: 'arrow-helper',
     });
+
+    const defaultFunctionWithLeadingConst = eval(
+      scriptToFunctionExpression(`
+const prefix = 'leading';
+
+export default function (input) {
+  return { ok: true, value: prefix + ':' + input.value };
+}
+      `),
+    ) as (input: { value: string }) => Promise<{ ok: boolean; value: string }>;
+    await expect(defaultFunctionWithLeadingConst({ value: 'const' })).resolves.toEqual({
+      ok: true,
+      value: 'leading:const',
+    });
+
+    const defaultArrowWithLeadingConst = eval(
+      scriptToFunctionExpression(`
+const buildResult = (value) => ({ ok: true, value });
+
+export default (input) => buildResult(input.value);
+      `),
+    ) as (input: { value: string }) => Promise<{ ok: boolean; value: string }>;
+    await expect(defaultArrowWithLeadingConst({ value: 'leading-arrow' })).resolves.toEqual({
+      ok: true,
+      value: 'leading-arrow',
+    });
+
+    const defaultIdentifierWithLeadingConst = eval(
+      scriptToFunctionExpression(`
+const exportedScript = async (input) => ({ ok: true, value: input.value });
+
+export default exportedScript;
+      `),
+    ) as (input: { value: string }) => Promise<{ ok: boolean; value: string }>;
+    await expect(defaultIdentifierWithLeadingConst({ value: 'identifier' })).resolves.toEqual({
+      ok: true,
+      value: 'identifier',
+    });
+
+    const defaultArrowWithExportedConstHelper = eval(
+      scriptToFunctionExpression(`
+export const prefix = 'named-export';
+
+export default (input) => ({ ok: true, value: prefix + ':' + input.value });
+      `),
+    ) as (input: { value: string }) => Promise<{ ok: boolean; value: string }>;
+    await expect(defaultArrowWithExportedConstHelper({ value: 'const-helper' })).resolves.toEqual({
+      ok: true,
+      value: 'named-export:const-helper',
+    });
+
+    const defaultArrowWithExportedFunctionHelper = eval(
+      scriptToFunctionExpression(`
+export function buildResult(value) {
+  return { ok: true, value };
+}
+
+export default (input) => buildResult(input.value);
+      `),
+    ) as (input: { value: string }) => Promise<{ ok: boolean; value: string }>;
+    await expect(defaultArrowWithExportedFunctionHelper({ value: 'function-helper' })).resolves.toEqual({
+      ok: true,
+      value: 'function-helper',
+    });
+
+    const defaultArrowWithExportList = eval(
+      scriptToFunctionExpression(`
+const buildResult = (value) => ({ ok: true, value });
+export { buildResult };
+
+export default (input) => buildResult(input.value);
+      `),
+    ) as (input: { value: string }) => Promise<{ ok: boolean; value: string }>;
+    await expect(defaultArrowWithExportList({ value: 'export-list' })).resolves.toEqual({
+      ok: true,
+      value: 'export-list',
+    });
+
+    const defaultExportListAlias = eval(
+      scriptToFunctionExpression(`
+const exportedScript = async (input) => ({ ok: true, value: input.value });
+
+export { exportedScript as default };
+      `),
+    ) as (input: { value: string }) => Promise<{ ok: boolean; value: string }>;
+    await expect(defaultExportListAlias({ value: 'default-alias' })).resolves.toEqual({
+      ok: true,
+      value: 'default-alias',
+    });
+
+    const defaultExportWithInternalNameCollision = eval(
+      scriptToFunctionExpression(`
+const __webCapDefaultExport = 'user-value';
+
+export default (input) => ({ ok: true, value: __webCapDefaultExport + ':' + input.value });
+      `),
+    ) as (input: { value: string }) => Promise<{ ok: boolean; value: string }>;
+    await expect(defaultExportWithInternalNameCollision({ value: 'collision' })).resolves.toEqual({
+      ok: true,
+      value: 'user-value:collision',
+    });
+
+    expect(
+      scriptToFunctionExpression(`
+export { helper } from './helper.js';
+export default function () {
+  return { ok: true };
+}
+      `),
+    ).toContain(`export { helper } from './helper.js';`);
   });
 
   it('inserts a managed input barrier after generated managed input statements', () => {

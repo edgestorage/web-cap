@@ -63,32 +63,48 @@ function readDefaultExportSource(code: string): FunctionSource | undefined {
     true,
     ts.ScriptKind.JS,
   );
-  const firstStatement = sourceFile.statements[0];
-  if (!firstStatement) {
+  const defaultExportStatement = sourceFile.statements.find(isDefaultExportStatement);
+  if (!defaultExportStatement) {
     return undefined;
   }
 
-  if (ts.isExportAssignment(firstStatement)) {
-    const expression = skipExpressionParens(firstStatement.expression);
+  if (ts.isExportAssignment(defaultExportStatement)) {
+    const expression = skipExpressionParens(defaultExportStatement.expression);
     const defaultExportSource = ensureAsyncFunctionSource({
       source: expression.getText(sourceFile),
       needsAsync: isFunctionLikeExpression(expression) && !hasAsyncModifier(expression),
     });
     const source = wrapDefaultExportWithModuleScope(
       code,
-      firstStatement,
+      defaultExportStatement,
       defaultExportSource,
       undefined,
     );
     return { source, needsAsync: false };
   }
 
+  if (ts.isExportDeclaration(defaultExportStatement)) {
+    const exportedLocalName = readDefaultExportLocalName(defaultExportStatement);
+    if (!exportedLocalName) {
+      return undefined;
+    }
+    return {
+      source: wrapDefaultExportWithModuleScope(
+        code,
+        defaultExportStatement,
+        exportedLocalName,
+        undefined,
+      ),
+      needsAsync: false,
+    };
+  }
+
   if (
-    ts.isFunctionDeclaration(firstStatement) &&
-    hasModifier(firstStatement, ts.SyntaxKind.ExportKeyword) &&
-    hasModifier(firstStatement, ts.SyntaxKind.DefaultKeyword)
+    ts.isFunctionDeclaration(defaultExportStatement) &&
+    hasModifier(defaultExportStatement, ts.SyntaxKind.ExportKeyword) &&
+    hasModifier(defaultExportStatement, ts.SyntaxKind.DefaultKeyword)
   ) {
-    const defaultModifier = (ts.getModifiers(firstStatement) ?? []).find(
+    const defaultModifier = (ts.getModifiers(defaultExportStatement) ?? []).find(
       (modifier) => modifier.kind === ts.SyntaxKind.DefaultKeyword,
     );
     if (!defaultModifier) {
@@ -96,22 +112,49 @@ function readDefaultExportSource(code: string): FunctionSource | undefined {
     }
 
     const sourceStart = skipWhitespace(code, defaultModifier.end);
-    const sourceEnd = firstStatement.end;
+    const sourceEnd = defaultExportStatement.end;
     const defaultExportSource = ensureAsyncFunctionSource({
       source: code.slice(sourceStart, sourceEnd),
-      needsAsync: !hasAsyncModifier(firstStatement),
+      needsAsync: !hasAsyncModifier(defaultExportStatement),
     });
     return {
       source: wrapDefaultExportWithModuleScope(
         code,
-        firstStatement,
+        defaultExportStatement,
         defaultExportSource,
-        firstStatement.name?.text,
+        defaultExportStatement.name?.text,
       ),
       needsAsync: false,
     };
   }
 
+  return undefined;
+}
+
+function isDefaultExportStatement(statement: ts.Statement): boolean {
+  return (
+    ts.isExportAssignment(statement) ||
+    (ts.isExportDeclaration(statement) && Boolean(readDefaultExportLocalName(statement))) ||
+    (ts.isFunctionDeclaration(statement) &&
+      hasModifier(statement, ts.SyntaxKind.ExportKeyword) &&
+      hasModifier(statement, ts.SyntaxKind.DefaultKeyword))
+  );
+}
+
+function readDefaultExportLocalName(statement: ts.ExportDeclaration): string | undefined {
+  if (
+    statement.moduleSpecifier ||
+    !statement.exportClause ||
+    !ts.isNamedExports(statement.exportClause)
+  ) {
+    return undefined;
+  }
+
+  for (const element of statement.exportClause.elements) {
+    if (element.name.text === 'default') {
+      return (element.propertyName ?? element.name).getText();
+    }
+  }
   return undefined;
 }
 
@@ -121,15 +164,77 @@ function wrapDefaultExportWithModuleScope(
   defaultExportSource: string,
   declarationName: string | undefined,
 ): string {
-  const beforeDefaultExport = code.slice(0, defaultExportStatement.getStart()).trim();
-  const afterDefaultExport = code.slice(defaultExportStatement.end).trim();
-  const moduleBody = [beforeDefaultExport, afterDefaultExport].filter(Boolean).join('\n');
+  const beforeDefaultExport = stripNamedExportSyntax(
+    code.slice(0, defaultExportStatement.getStart()),
+  ).trim();
+  const afterDefaultExport = stripNamedExportSyntax(code.slice(defaultExportStatement.end)).trim();
 
   if (declarationName) {
-    return `(() => {\n${defaultExportSource}\n${moduleBody ? `${moduleBody}\n` : ''}return ${declarationName};\n})()`;
+    return `(() => {\n${beforeDefaultExport ? `${beforeDefaultExport}\n` : ''}${defaultExportSource}\n${afterDefaultExport ? `${afterDefaultExport}\n` : ''}return ${declarationName};\n})()`;
   }
 
-  return `(() => {\nconst __webCapDefaultExport = ${defaultExportSource};\n${moduleBody ? `${moduleBody}\n` : ''}return __webCapDefaultExport;\n})()`;
+  const defaultExportBindingName = readAvailableInternalIdentifier(code, '__webCapDefaultExport');
+  return `(() => {\n${beforeDefaultExport ? `${beforeDefaultExport}\n` : ''}const ${defaultExportBindingName} = ${defaultExportSource};\n${afterDefaultExport ? `${afterDefaultExport}\n` : ''}return ${defaultExportBindingName};\n})()`;
+}
+
+function readAvailableInternalIdentifier(code: string, baseName: string): string {
+  if (!new RegExp(`\\b${escapeRegExp(baseName)}\\b`).test(code)) {
+    return baseName;
+  }
+
+  for (let index = 1; index < 1000; index += 1) {
+    const candidate = `${baseName}${index}`;
+    if (!new RegExp(`\\b${escapeRegExp(candidate)}\\b`).test(code)) {
+      return candidate;
+    }
+  }
+  throw new Error(`Unable to allocate internal script binding for ${baseName}.`);
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function stripNamedExportSyntax(code: string): string {
+  if (!/\bexport\b/.test(code)) {
+    return code;
+  }
+
+  const sourceFile = ts.createSourceFile(
+    'web-cap-script-section.js',
+    code,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.JS,
+  );
+  const removals: Array<{ start: number; end: number }> = [];
+
+  for (const statement of sourceFile.statements) {
+    if (ts.isExportDeclaration(statement)) {
+      if (!statement.moduleSpecifier) {
+        removals.push({ start: statement.getStart(sourceFile), end: statement.end });
+      }
+      continue;
+    }
+
+    if (!ts.canHaveModifiers(statement)) {
+      continue;
+    }
+    const modifiers = ts.getModifiers(statement) ?? [];
+    if (modifiers.some((modifier) => modifier.kind === ts.SyntaxKind.DefaultKeyword)) {
+      continue;
+    }
+    for (const modifier of modifiers) {
+      if (modifier.kind === ts.SyntaxKind.ExportKeyword) {
+        removals.push({
+          start: modifier.getStart(sourceFile),
+          end: skipWhitespace(code, modifier.end),
+        });
+      }
+    }
+  }
+
+  return applyRemovals(code, removals);
 }
 
 function readTopLevelFunctionSource(code: string): FunctionSource | undefined {
@@ -324,6 +429,19 @@ function applyInsertions(code: string, insertions: Array<{ position: number; tex
     output += code.slice(cursor, insertion.position);
     output += insertion.text;
     cursor = insertion.position;
+  }
+  return output + code.slice(cursor);
+}
+
+function applyRemovals(code: string, removals: Array<{ start: number; end: number }>) {
+  let output = '';
+  let cursor = 0;
+  for (const removal of [...removals].sort((first, second) => first.start - second.start)) {
+    if (removal.end <= cursor) {
+      continue;
+    }
+    output += code.slice(cursor, Math.max(cursor, removal.start));
+    cursor = Math.max(cursor, removal.end);
   }
   return output + code.slice(cursor);
 }
