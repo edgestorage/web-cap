@@ -232,7 +232,7 @@ async function applyConfiguredScriptExecutionOptions(
     executionTabGroupIndicator: config.executionTabGroupIndicator ?? true,
   };
 
-  if (evidence.length > 0) {
+  if (request.options?.evidence === undefined && evidence.length > 0) {
     request.options = {
       ...request.options,
       evidence,

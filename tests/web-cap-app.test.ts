@@ -1234,16 +1234,16 @@ describe('WebCapAgentApp', () => {
         ...parsed,
         script: {
           ...parsed.script,
-          timeoutMs: 60_001,
+          timeoutMs: 120_001,
         },
       }),
-    ).toThrow(/less than or equal to 60000/i);
+    ).toThrow(/less than or equal to 120000/i);
 
     await expect(
       app.scriptExecute({
         script: 'export default async function () { return { ok: true }; }',
         input: {},
-        options: { timeoutMs: 60_001 },
+        options: { timeoutMs: 120_001 },
       }),
     ).rejects.toMatchObject({ code: 'INVALID_INPUT' });
   });

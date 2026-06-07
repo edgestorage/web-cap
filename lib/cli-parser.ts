@@ -11,6 +11,7 @@ export interface ScriptExecuteCliOptions {
   inputFile?: string;
   tabId?: number;
   timeoutMs?: number;
+  noEvidence?: boolean;
   register?: boolean;
   pretty?: boolean;
 }
@@ -171,6 +172,9 @@ export async function buildScriptExecuteRequest(
 
   if (options.timeoutMs !== undefined) {
     executionOptions.timeoutMs = options.timeoutMs;
+  }
+  if (options.noEvidence === true) {
+    executionOptions.evidence = [];
   }
   if (options.register === true) {
     request.register = true;
@@ -392,10 +396,15 @@ function parseScriptExecuteArgs(args: string[]): CliCommand {
   if (options === 'help') {
     return helpForCommand(command);
   }
+  const normalizedOptions = options as ScriptExecuteCliOptions & { evidence?: boolean };
+  if (normalizedOptions.evidence === false) {
+    normalizedOptions.noEvidence = true;
+  }
+  delete normalizedOptions.evidence;
   if (options.tabId === undefined) {
     throw new Error('script-execute requires --tab-id.');
   }
-  return { name: 'script-execute', options };
+  return { name: 'script-execute', options: normalizedOptions };
 }
 
 function parseSessionStatusArgs(args: string[]): CliCommand {
@@ -436,7 +445,7 @@ function createRootHelpParser(): Command {
 
 function scriptExecutionHelp(): string {
   return `Script execution:
-  web-cap script-execute --tab-id <id> --script <code> [--input <json>] [--timeout-ms <ms>] [--register]
+  web-cap script-execute --tab-id <id> --script <code> [--input <json>] [--timeout-ms <ms>] [--no-evidence] [--register]
   web-cap script-execute --tab-id <id> --script-file <path> [--input-file <path>] [--pretty]
   web-cap script-execute --tab-id <id> --script-file - < script.js
 
@@ -453,6 +462,7 @@ ${scriptRuntimeApiHelp('  ')}
   --input-file <path>   Read the script input object from a file, or stdin when path is "-".
   --tab-id <id>         Required browser tab id to target. Use session-status to find it.
   --timeout-ms <ms>     Execution timeout in milliseconds.
+  --no-evidence         Disable execution evidence collection for this run.
   --register            Save the script for reuse only if it returns ok: true.
   --pretty              Print formatted JSON output. Default output is compact.
 `;
@@ -557,6 +567,7 @@ function createScriptExecuteParser(): Command {
     .option('--input-file <path>', 'Read the script input object from a file, or stdin when path is "-".')
     .requiredOption('--tab-id <id>', 'Browser tab id to target.', parseIntegerOption)
     .option('--timeout-ms <ms>', 'Execution timeout in milliseconds.', parseIntegerOption)
+    .option('--no-evidence', 'Disable execution evidence collection for this run.')
     .option('--register', 'Save the script for reuse only if it returns ok: true.')
     .option('--pretty', 'Print formatted JSON output.');
 }

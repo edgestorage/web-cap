@@ -164,7 +164,7 @@ export const mcpToolDefinitions: {
             .positive()
             .max(MAX_EXECUTION_TIMEOUT_MS)
             .optional()
-            .describe('Execution timeout in milliseconds. If omitted, execution times out after 30000 ms. Maximum is 60000 ms.'),
+            .describe('Execution timeout in milliseconds. If omitted, execution times out after 30000 ms. Maximum is 120000 ms.'),
           activateTab: z
             .boolean()
             .optional()

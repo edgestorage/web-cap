@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 export const DEFAULT_EXECUTION_TIMEOUT_MS = 30_000;
-export const MAX_EXECUTION_TIMEOUT_MS = 60_000;
+export const MAX_EXECUTION_TIMEOUT_MS = 120_000;
 
 export const scriptTypeSchema = z.enum(['read', 'act']);
 export type ScriptType = z.infer<typeof scriptTypeSchema>;

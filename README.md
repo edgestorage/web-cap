@@ -158,7 +158,7 @@ A typical agent flow is:
 
 Execute script code in the selected browser tab. Scripts receive one object argument and return one JSON object.
 
-`script-execute` accepts optional execution settings such as `--timeout-ms`, `--script-file`, `--input-file`, and `--register`. During execution, scripts can use the injected Playwright-style `page` helper. `--register` saves the inline script only after execution succeeds with `ok: true`.
+`script-execute` accepts optional execution settings such as `--timeout-ms`, `--script-file`, `--input-file`, `--no-evidence`, and `--register`. During execution, scripts can use the injected Playwright-style `page` helper. `--register` saves the inline script only after execution succeeds with `ok: true`.
 
 ### Browser commands
 
@@ -201,7 +201,8 @@ Use files for larger payloads:
 web-cap script-execute \
   --tab-id 1 \
   --script-file ./script.js \
-  --input-file ./input.json
+  --input-file ./input.json \
+  --no-evidence
 ```
 
 Common CLI commands:
@@ -223,7 +224,7 @@ Persistent CLI configuration is managed with `web-cap config` and stored in loca
 
 | Key | Default | Example | Effect |
 | --- | --- | --- | --- |
-| `evidence` | `common` | `web-cap config set evidence events,visibleElements` | Controls script execution evidence. Use `common`, `all`, or a comma-separated list of `events` and `visibleElements`. |
+| `evidence` | `common` | `web-cap config set evidence events,visibleElements` | Controls script execution evidence. Use `common`, `all`, or a comma-separated list of `events` and `visibleElements`. Pass `--no-evidence` to `script-execute` to disable evidence for one run. |
 | `mouseTrajectorySimulation` | `false` | `web-cap config set mouseTrajectorySimulation true` | When enabled, browser-level managed mouse clicks send a multi-step movement path before press/release. |
 | `activateTabOnScriptExecute` | `false` | `web-cap config set activateTabOnScriptExecute true` | Activates the target tab before script execution. |
 

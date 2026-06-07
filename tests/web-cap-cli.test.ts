@@ -80,7 +80,8 @@ describe('WEB_CAP CLI', () => {
       '--tab-id',
       '42',
       '--timeout-ms',
-      '60000',
+      '120000',
+      '--no-evidence',
       '--register',
     ]);
 
@@ -90,7 +91,8 @@ describe('WEB_CAP CLI', () => {
         script: 'export default async function () { return { ok: true }; }',
         input: '{"name":"Ada"}',
         tabId: 42,
-        timeoutMs: 60_000,
+        timeoutMs: 120_000,
+        noEvidence: true,
         register: true,
       },
     });
@@ -104,7 +106,8 @@ describe('WEB_CAP CLI', () => {
       input: { name: 'Ada' },
       options: {
         tabId: 42,
-        timeoutMs: 60_000,
+        timeoutMs: 120_000,
+        evidence: [],
       },
       register: true,
     });
@@ -385,6 +388,7 @@ describe('WEB_CAP CLI', () => {
     expect(stdout).toContain('--script-file <path>');
     expect(stdout).toContain('--tab-id <id>');
     expect(stdout).toContain('--timeout-ms <ms>');
+    expect(stdout).toContain('--no-evidence');
     expect(stdout).not.toContain('--definition-file');
     expect(stdout).not.toContain('--active <true|false>');
     expect(stdout).not.toContain('--duration-ms <ms>');
@@ -411,6 +415,7 @@ describe('WEB_CAP CLI', () => {
     expect(stdout).toContain('--script <code>');
     expect(stdout).toContain('--script-file <path>');
     expect(stdout).toContain('--input <json>');
+    expect(stdout).toContain('--no-evidence');
     expect(stdout).not.toContain('--definition');
     expect(stdout).not.toContain('browser-new-tab');
   });
@@ -427,6 +432,7 @@ describe('WEB_CAP CLI', () => {
     expect(stderr).toBe('');
     expect(stdout).toContain('Usage: script-execute [options]');
     expect(stdout).toContain('--script <code>');
+    expect(stdout).toContain('--no-evidence');
     expect(stdout).toContain('Runtime script APIs:');
     expect(stdout).toContain('page.locator()');
     expect(stdout).not.toContain('Usage: web-cap <command> [options]');
@@ -1483,6 +1489,74 @@ describe('WEB_CAP CLI', () => {
           executionPageIndicator: true,
           executionTabGroupIndicator: true,
           mouseTrajectorySimulation: true,
+        },
+      },
+    ]);
+  });
+
+  it('lets script-execute disable evidence for one run', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'web-cap-cli-test-'));
+    process.env.WEB_CAP_STATE_DIR = tempDir;
+    const calls: ExecuteScriptRequest[] = [];
+    const service = createService({
+      async scriptExecute(request: ExecuteScriptRequest) {
+        calls.push(request);
+        return {
+          scriptId: 'temp.script.000001',
+          status: 'succeeded',
+          result: { ok: true },
+          evidence: { events: [], screenshots: [] },
+          timingMs: 1,
+        };
+      },
+    });
+    let stdout = '';
+    let stderr = '';
+
+    const setEvidenceCode = await runCli(
+      ['config', 'set', 'evidence', 'events,visibleElements'],
+      {
+        stdout: { write: (chunk: string) => { stdout += chunk; return true; } },
+        stderr: { write: (chunk: string) => { stderr += chunk; return true; } },
+      },
+      async () => {
+        throw new Error('config should not connect to daemon');
+      },
+    );
+
+    expect(setEvidenceCode).toBe(0);
+    expect(stderr).toBe('');
+    expect(JSON.parse(stdout)).toMatchObject({
+      key: 'evidence',
+      value: ['events', 'visibleElements'],
+    });
+
+    const executeCode = await runCli(
+      [
+        'script-execute',
+        '--script',
+        'export default async function () { return { ok: true }; }',
+        '--tab-id',
+        '9',
+        '--no-evidence',
+      ],
+      {
+        stdout: { write: () => true },
+        stderr: { write: (chunk: string) => { stderr += chunk; return true; } },
+      },
+      async () => service,
+    );
+
+    expect(executeCode).toBe(0);
+    expect(stderr).toBe('');
+    expect(calls).toEqual([
+      {
+        script: 'export default async function () { return { ok: true }; }',
+        input: {},
+        options: {
+          tabId: 9,
+          evidence: [],
+          executionTabGroupIndicator: true,
         },
       },
     ]);
