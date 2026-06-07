@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, readFile, writeFile, rm, utimes } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
+import { Readable } from 'node:stream';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   buildScriptExecuteRequest,
@@ -158,6 +159,42 @@ describe('WEB_CAP CLI', () => {
         tabId: 42,
       },
     });
+  });
+
+  it('loads input from stdin when input-file is dash', async () => {
+    await expect(
+      buildScriptExecuteRequest(
+        {
+          script: 'export default async function () { return input; }',
+          inputFile: '-',
+          tabId: 42,
+        },
+        {
+          readStdin: async () => '{"name":"Ada"}',
+        },
+      ),
+    ).resolves.toEqual({
+      script: 'export default async function () { return input; }',
+      input: { name: 'Ada' },
+      options: {
+        tabId: 42,
+      },
+    });
+  });
+
+  it('rejects reading script and input from stdin at the same time', async () => {
+    await expect(
+      buildScriptExecuteRequest(
+        {
+          scriptFile: '-',
+          inputFile: '-',
+          tabId: 42,
+        },
+        {
+          readStdin: async () => '{}',
+        },
+      ),
+    ).rejects.toThrow(/Only one of --script-file or --input-file can read from stdin/);
   });
 
   it('requires a tab id for script execution', async () => {
@@ -643,13 +680,61 @@ describe('WEB_CAP CLI', () => {
     expect(code).toBe(0);
     expect(JSON.parse(stdout)).toMatchObject({ id: 'userscript.foo' });
     expect(calls).toEqual([
-      'install:./foo.js:true',
+      `install:${resolve('./foo.js')}:true`,
       'enable:userscript.foo:true',
       'disable:userscript.foo',
       'list',
       'list',
       'remove:userscript.foo',
     ]);
+  });
+
+  it('loads userscript source from stdin when file is dash', async () => {
+    const calls: string[] = [];
+    const service = createService({
+      async userScriptInstall(request) {
+        calls.push(
+          `install:${request.sourcePath}:${request.source?.includes('web-cap userscript')}:${request.applyNow === true}`,
+        );
+        return {
+          id: 'userscript.stdin',
+          name: 'From stdin',
+          version: '1.0.0',
+          status: 'active',
+          matches: ['https://example.com/*'],
+          runAt: 'document-idle',
+          code: request.source ?? '',
+          sourcePath: request.sourcePath,
+          installedAt: '2026-06-04T00:00:00.000Z',
+          updatedAt: '2026-06-04T00:00:00.000Z',
+        };
+      },
+      sessionStatus() {
+        return {
+          connected: true,
+          tabs: [],
+          authenticatedSites: [],
+          userScriptsAvailable: true,
+        };
+      },
+    });
+
+    let stdout = '';
+    let stderr = '';
+    const code = await runCli(
+      ['userscript', 'install', '--file', '-', '--apply-now'],
+      {
+        stdin: Readable.from(['/**\n * web-cap userscript\n * @name From stdin\n * @match https://example.com/*\n */\nconsole.log("ok");\n']),
+        stdout: { write: (chunk: string) => { stdout += chunk; return true; } },
+        stderr: { write: (chunk: string) => { stderr += chunk; return true; } },
+      },
+      async () => service,
+    );
+
+    expect(code).toBe(0);
+    expect(stderr).toBe('');
+    expect(JSON.parse(stdout)).toMatchObject({ id: 'userscript.stdin' });
+    expect(calls).toEqual(['install:<stdin>:true:true']);
   });
 
   it('prints a userscript support notice for userscript commands', async () => {

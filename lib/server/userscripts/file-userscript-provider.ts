@@ -9,7 +9,9 @@ import {
 } from './userscript-parser';
 
 export interface UserScriptInstallInput {
-  filePath: string;
+  filePath?: string;
+  source?: string;
+  sourcePath?: string;
 }
 
 export interface UserScriptProvider {
@@ -27,10 +29,13 @@ export class FileUserScriptProvider implements UserScriptProvider {
   }
 
   async install(input: UserScriptInstallInput): Promise<UserScriptDefinition> {
-    const source = await readFile(input.filePath, 'utf8');
+    const source = input.source ?? (input.filePath ? await readFile(input.filePath, 'utf8') : undefined);
+    if (source === undefined) {
+      throw new Error('User script install requires source or filePath.');
+    }
     const now = new Date().toISOString();
     const parsed = parseUserScriptDefinition(source, {
-      sourcePath: input.filePath,
+      sourcePath: input.sourcePath ?? input.filePath ?? '<stdin>',
       updatedAt: now,
     });
     await mkdir(this.userscriptsDir, { recursive: true });

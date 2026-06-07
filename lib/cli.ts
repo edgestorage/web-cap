@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 
 import { readFileSync, realpathSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   buildScriptExecuteRequest,
   parseCliArgs,
+  readTextStream,
   type CliCommand,
   type JsonOutputCliOptions,
 } from './cli-parser';
@@ -22,6 +23,7 @@ import { runMcpServer } from './mcp-server';
 export { buildScriptExecuteRequest, parseCliArgs } from './cli-parser';
 
 interface CliIo {
+  stdin?: NodeJS.ReadableStream;
   stdout: Pick<NodeJS.WriteStream, 'write'>;
   stderr: Pick<NodeJS.WriteStream, 'write'>;
 }
@@ -52,9 +54,10 @@ export async function runCli(
       return 0;
     }
 
+    const readStdin = () => readTextStream(io.stdin ?? process.stdin);
     const scriptExecuteRequest =
       command.name === 'script-execute'
-        ? await buildScriptExecuteRequest(command.options)
+        ? await buildScriptExecuteRequest(command.options, { readStdin })
         : undefined;
     if (scriptExecuteRequest) {
       await applyConfiguredScriptExecutionOptions(scriptExecuteRequest);
@@ -73,7 +76,7 @@ export async function runCli(
       }
 
       if (command.name === 'userscript') {
-        const result = await handleUserScriptCommand(app, command.options);
+        const result = await handleUserScriptCommand(app, command.options, readStdin);
         writeJson(io, result, command.options);
         await writeUserScriptAvailabilityHint(app, io);
         return 0;
@@ -100,11 +103,19 @@ export async function runCli(
 async function handleUserScriptCommand(
   app: WebCapAgentService,
   options: Extract<CliCommand, { name: 'userscript' }>['options'],
+  readStdin: () => Promise<string>,
 ): Promise<unknown> {
   switch (options.action) {
     case 'install':
+      if (options.file === '-') {
+        return await app.userScriptInstall({
+          source: await readStdin(),
+          sourcePath: '<stdin>',
+          applyNow: options.applyNow,
+        });
+      }
       return await app.userScriptInstall({
-        filePath: options.file!,
+        filePath: resolve(options.file!),
         applyNow: options.applyNow,
       });
     case 'enable':

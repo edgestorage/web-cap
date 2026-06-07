@@ -134,6 +134,9 @@ export async function buildScriptExecuteRequest(
   const readScriptFile = readers.readScriptFile ?? ((path: string) => readFile(path, 'utf8'));
   const readInputFile = readers.readInputFile ?? ((path: string) => readFile(path, 'utf8'));
   const readStdin = readers.readStdin ?? readProcessStdin;
+  if (options.scriptFile === '-' && options.inputFile === '-') {
+    throw new Error('Only one of --script-file or --input-file can read from stdin.');
+  }
 
   const script =
     options.script ??
@@ -150,7 +153,12 @@ export async function buildScriptExecuteRequest(
   }
 
   const inputRaw =
-    options.input ?? (options.inputFile ? await readInputFile(options.inputFile) : '{}');
+    options.input ??
+    (options.inputFile
+      ? options.inputFile === '-'
+        ? await readStdin()
+        : await readInputFile(options.inputFile)
+      : '{}');
   const input = parseJsonObject(inputRaw, 'input');
   const executionOptions: NonNullable<ExecuteScriptRequest['options']> = {
     tabId: options.tabId,
@@ -171,15 +179,19 @@ export async function buildScriptExecuteRequest(
   return request;
 }
 
-async function readProcessStdin(): Promise<string> {
+export async function readProcessStdin(): Promise<string> {
+  return await readTextStream(process.stdin);
+}
+
+export async function readTextStream(stream: NodeJS.ReadableStream): Promise<string> {
   return await new Promise<string>((resolve, reject) => {
     let value = '';
-    process.stdin.setEncoding('utf8');
-    process.stdin.on('data', (chunk: string) => {
+    stream.setEncoding('utf8');
+    stream.on('data', (chunk: string) => {
       value += chunk;
     });
-    process.stdin.once('error', reject);
-    process.stdin.once('end', () => {
+    stream.once('error', reject);
+    stream.once('end', () => {
       resolve(value);
     });
   });
@@ -438,7 +450,7 @@ ${scriptRuntimeApiHelp('  ')}
   --script <code>       Script source code to run in the browser tab.
   --script-file <path>  Read script source code from a file, or stdin when path is "-".
   --input <json>        JSON object passed to the script. Defaults to {}.
-  --input-file <path>   Read the script input object from a file.
+  --input-file <path>   Read the script input object from a file, or stdin when path is "-".
   --tab-id <id>         Required browser tab id to target. Use session-status to find it.
   --timeout-ms <ms>     Execution timeout in milliseconds.
   --register            Save the script for reuse only if it returns ok: true.
@@ -523,7 +535,7 @@ function createUserScriptParser(): Command {
     .usage('[install|list|show|enable|disable|remove] [id] [options]')
     .argument('[action]')
     .argument('[id]')
-    .option('--file <path>', 'JSDoc-style web-cap userscript file to install.')
+    .option('--file <path>', 'JSDoc-style web-cap userscript file to install, or stdin when path is "-".')
     .option('--apply-now', 'Immediately run the installed or enabled userscript on matching open tabs.')
     .option('--pretty', 'Print formatted JSON output.');
 }
@@ -540,9 +552,9 @@ function createScriptExecuteParser(): Command {
       'Run JavaScript in the selected browser tab with JSON input, optional observable page evidence, and Playwright-style page/locator helpers.',
     )
     .option('--script <code>', 'Script source code to run in the browser tab.')
-    .option('--script-file <path>', 'Read script source code from a file.')
+    .option('--script-file <path>', 'Read script source code from a file, or stdin when path is "-".')
     .option('--input <json>', 'JSON object passed to the script. Defaults to {}.')
-    .option('--input-file <path>', 'Read the script input object from a file.')
+    .option('--input-file <path>', 'Read the script input object from a file, or stdin when path is "-".')
     .requiredOption('--tab-id <id>', 'Browser tab id to target.', parseIntegerOption)
     .option('--timeout-ms <ms>', 'Execution timeout in milliseconds.', parseIntegerOption)
     .option('--register', 'Save the script for reuse only if it returns ok: true.')

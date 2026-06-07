@@ -53,10 +53,16 @@ export const rpcInputSchemas = {
     limit: z.number().int().optional(),
   }),
   scriptRegistryList: z.object({}),
-  userScriptInstall: z.object({
-    filePath: z.string().min(1),
-    applyNow: z.boolean().optional(),
-  }),
+  userScriptInstall: z
+    .object({
+      filePath: z.string().min(1).optional(),
+      source: z.string().min(1).optional(),
+      sourcePath: z.string().min(1).optional(),
+      applyNow: z.boolean().optional(),
+    })
+    .refine((input) => (input.filePath === undefined) !== (input.source === undefined), {
+      message: 'Provide exactly one of filePath or source.',
+    }),
   userScriptList: z.object({}),
   userScriptEnable: z.object({
     id: z.string().min(1),

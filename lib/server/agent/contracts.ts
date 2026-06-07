@@ -21,7 +21,9 @@ export interface ExecuteScriptRequest {
 }
 
 export interface InstallUserScriptRequest {
-  filePath: string;
+  filePath?: string;
+  source?: string;
+  sourcePath?: string;
   applyNow?: boolean;
 }
 

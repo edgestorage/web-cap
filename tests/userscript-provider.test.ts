@@ -93,6 +93,21 @@ console.log('foo');
     await expect(provider.list()).resolves.toHaveLength(1);
   });
 
+  it('installs userscripts from source content', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'web-cap-userscript-test-'));
+
+    const provider = new FileUserScriptProvider(tempDir);
+    const installed = await provider.install({
+      source: validUserScript,
+      sourcePath: '<stdin>',
+    });
+    const storedSource = await readFile(join(tempDir, 'userscripts', 'userscript.foo.js'), 'utf8');
+
+    expect(installed.sourcePath).toBe(join(tempDir, 'userscripts', 'userscript.foo.js'));
+    expect(storedSource).toContain('web-cap userscript');
+    await expect(provider.list()).resolves.toHaveLength(1);
+  });
+
   it('removes installed userscripts by id', async () => {
     tempDir = await mkdtemp(join(tmpdir(), 'web-cap-userscript-test-'));
     const sourceFile = join(tempDir, 'foo.js');
