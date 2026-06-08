@@ -251,7 +251,8 @@ interface SessionStatusTabResult {
   tabId: number;
   url: string;
   title: string;
-  site: string;
+  loadedUserScriptCount?: number;
+  loadedUserScriptIds?: string[];
   readyState: string;
 }
 
@@ -338,17 +339,20 @@ function formatRuntime(runtime: RuntimeConnectionSnapshot): SessionStatusRuntime
     extensionVersion: runtime.extensionVersion,
     userScriptsAvailable: runtime.userScriptsAvailable,
     lastSeenAt: runtime.lastSeenAt,
-    activeTab: runtime.activeTab ? formatTab(runtime.activeTab) : undefined,
-    tabs: runtime.tabs.map(formatTab),
+    activeTab: runtime.activeTab ? formatTab(runtime.activeTab, true) : undefined,
+    tabs: runtime.tabs.map((tab) => formatTab(tab)),
   };
 }
 
-function formatTab(tab: RuntimeTabSnapshot): SessionStatusTabResult {
+function formatTab(tab: RuntimeTabSnapshot, includeLoadedUserScriptIds = false): SessionStatusTabResult {
+  const loadedUserScriptCount = tab.loadedUserScriptCount ?? 0;
+  const loadedUserScriptIds = tab.loadedUserScriptIds ?? [];
   return {
     tabId: tab.tabId,
     url: tab.url,
     title: tab.title,
-    site: tab.site,
+    ...(loadedUserScriptCount > 0 ? { loadedUserScriptCount } : {}),
+    ...(includeLoadedUserScriptIds && loadedUserScriptIds.length > 0 ? { loadedUserScriptIds } : {}),
     readyState: tab.readyState,
   };
 }

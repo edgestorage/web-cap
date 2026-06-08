@@ -29,6 +29,8 @@ export interface RuntimeTabSnapshot {
   url: string;
   title: string;
   site: string;
+  loadedUserScriptCount?: number;
+  loadedUserScriptIds?: string[];
   readyState: string;
   updatedAt: string;
 }

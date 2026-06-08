@@ -979,11 +979,14 @@ describe('WEB_CAP CLI', () => {
           sessionId: 'active-runtime',
           browserName: 'Chrome',
           extensionVersion: '1.2.3',
+          userScriptsAvailable: true,
           activeTab: {
             tabId: 7,
             url: 'https://github.com/edgestorage/web-cap/issues',
             title: 'Issues',
             site: 'generic-web',
+            loadedUserScriptCount: 1,
+            loadedUserScriptIds: ['com.github.issues'],
             readyState: 'complete',
             updatedAt: '2026-05-15T00:00:00.000Z',
           },
@@ -993,6 +996,8 @@ describe('WEB_CAP CLI', () => {
               url: 'https://github.com/edgestorage/web-cap/issues',
               title: 'Issues',
               site: 'generic-web',
+              loadedUserScriptCount: 1,
+              loadedUserScriptIds: ['com.github.issues'],
               readyState: 'complete',
               updatedAt: '2026-05-15T00:00:00.000Z',
             },
@@ -1005,11 +1010,14 @@ describe('WEB_CAP CLI', () => {
               sessionId: 'active-runtime',
               browserName: 'Chrome',
               extensionVersion: '1.2.3',
+              userScriptsAvailable: true,
               activeTab: {
                 tabId: 7,
                 url: 'https://github.com/edgestorage/web-cap/issues',
                 title: 'Issues',
                 site: 'generic-web',
+                loadedUserScriptCount: 1,
+                loadedUserScriptIds: ['com.github.issues'],
                 readyState: 'complete',
                 updatedAt: '2026-05-15T00:00:00.000Z',
               },
@@ -1019,6 +1027,8 @@ describe('WEB_CAP CLI', () => {
                   url: 'https://github.com/edgestorage/web-cap/issues',
                   title: 'Issues',
                   site: 'generic-web',
+                  loadedUserScriptCount: 1,
+                  loadedUserScriptIds: ['com.github.issues'],
                   readyState: 'complete',
                   updatedAt: '2026-05-15T00:00:00.000Z',
                 },
@@ -1031,11 +1041,14 @@ describe('WEB_CAP CLI', () => {
               sessionId: 'second-runtime',
               browserName: 'Edge',
               extensionVersion: '1.2.3',
+              userScriptsAvailable: true,
               activeTab: {
                 tabId: 7,
                 url: 'https://www.example.com/docs',
                 title: 'Docs',
                 site: 'generic-web',
+                loadedUserScriptCount: 1,
+                loadedUserScriptIds: ['com.example.docs'],
                 readyState: 'complete',
                 updatedAt: '2026-05-15T00:00:00.000Z',
               },
@@ -1045,6 +1058,8 @@ describe('WEB_CAP CLI', () => {
                   url: 'https://www.example.com/docs',
                   title: 'Docs',
                   site: 'generic-web',
+                  loadedUserScriptCount: 1,
+                  loadedUserScriptIds: ['com.example.docs'],
                   readyState: 'complete',
                   updatedAt: '2026-05-15T00:00:00.000Z',
                 },
@@ -1061,6 +1076,8 @@ describe('WEB_CAP CLI', () => {
                   url: 'https://inactive.example/docs',
                   title: 'Inactive Docs',
                   site: 'generic-web',
+                  loadedUserScriptCount: 1,
+                  loadedUserScriptIds: ['com.inactive.docs'],
                   readyState: 'complete',
                   updatedAt: '2026-05-15T00:00:00.000Z',
                 },
@@ -1128,12 +1145,14 @@ describe('WEB_CAP CLI', () => {
           sessionId: 'active-runtime',
           browserName: 'Chrome',
           extensionVersion: '1.2.3',
+          userScriptsAvailable: true,
           lastSeenAt: '2026-05-15T00:00:01.000Z',
           activeTab: {
             tabId: 7,
             url: 'https://github.com/edgestorage/web-cap/issues',
             title: 'Issues',
-            site: 'generic-web',
+            loadedUserScriptCount: 1,
+            loadedUserScriptIds: ['com.github.issues'],
             readyState: 'complete',
           },
           tabs: [
@@ -1141,7 +1160,7 @@ describe('WEB_CAP CLI', () => {
               tabId: 7,
               url: 'https://github.com/edgestorage/web-cap/issues',
               title: 'Issues',
-              site: 'generic-web',
+              loadedUserScriptCount: 1,
               readyState: 'complete',
             },
           ],
@@ -1150,12 +1169,14 @@ describe('WEB_CAP CLI', () => {
           sessionId: 'second-runtime',
           browserName: 'Edge',
           extensionVersion: '1.2.3',
+          userScriptsAvailable: true,
           lastSeenAt: '2026-05-15T00:00:02.000Z',
           activeTab: {
             tabId: 7,
             url: 'https://www.example.com/docs',
             title: 'Docs',
-            site: 'generic-web',
+            loadedUserScriptCount: 1,
+            loadedUserScriptIds: ['com.example.docs'],
             readyState: 'complete',
           },
           tabs: [
@@ -1163,21 +1184,20 @@ describe('WEB_CAP CLI', () => {
               tabId: 7,
               url: 'https://www.example.com/docs',
               title: 'Docs',
-              site: 'generic-web',
+              loadedUserScriptCount: 1,
               readyState: 'complete',
             },
             {
               tabId: 8,
               url: 'https://empty.example/docs',
               title: 'Empty Docs',
-              site: 'generic-web',
               readyState: 'complete',
             },
             {
               tabId: 9,
               url: 'https://inactive.example/docs',
               title: 'Inactive Docs',
-              site: 'generic-web',
+              loadedUserScriptCount: 1,
               readyState: 'complete',
             },
           ],
@@ -1191,10 +1211,17 @@ describe('WEB_CAP CLI', () => {
     expect(parsed).not.toHaveProperty('tabs');
     expect(parsed).not.toHaveProperty('authenticatedSites');
     expect(parsed.runtimes[0]).not.toHaveProperty('authenticatedSites');
+    expect(parsed.runtimes[0].activeTab).not.toHaveProperty('site');
     expect(parsed.runtimes[0].tabs[0]).not.toHaveProperty('updatedAt');
     expect(parsed.runtimes[0].tabs[0]).not.toHaveProperty('availableScripts');
+    expect(parsed.runtimes[0].tabs[0]).not.toHaveProperty('site');
+    expect(parsed.runtimes[0].tabs[0]).not.toHaveProperty('loadedUserScriptIds');
+    expect(parsed.runtimes[1].activeTab).not.toHaveProperty('site');
     expect(parsed.runtimes[1].tabs[0]).not.toHaveProperty('updatedAt');
     expect(parsed.runtimes[1].tabs[0]).not.toHaveProperty('availableScripts');
+    expect(parsed.runtimes[1].tabs[0]).not.toHaveProperty('site');
+    expect(parsed.runtimes[1].tabs[0]).not.toHaveProperty('loadedUserScriptIds');
+    expect(parsed.runtimes[1].tabs[1]).not.toHaveProperty('loadedUserScriptCount');
   });
 
   it('runs the stdio MCP adapter as a CLI command', async () => {

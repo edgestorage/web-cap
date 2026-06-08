@@ -167,6 +167,8 @@ class RuntimeClient {
   private readonly executionTabIndicators = new Map<number, ExecutionTabIndicatorState>();
   private readonly userScriptExecutor = new UserScriptExecutor();
   private readonly debuggerExecutor = new DebuggerScriptExecutor();
+  private currentUserScripts: UserScriptDefinition[] = [];
+  private readonly registeredUserScriptIds = new Set<string>();
   private readonly browserCommandHandler = new BrowserCommandHandler({
     setLastActiveTabId: (tabId) => {
       this.lastActiveTabId = tabId;
@@ -1108,12 +1110,14 @@ class RuntimeClient {
     updatedAt: string,
     applyNowUserScriptIds?: string[],
   ): Promise<void> {
+    this.currentUserScripts = userscripts;
     await browser.storage.local.set({
       [USERSCRIPT_REGISTRY_STORAGE_KEY]: userscripts,
       [USERSCRIPT_REGISTRY_UPDATED_AT_STORAGE_KEY]: updatedAt,
     });
     await this.applyUserScriptRegistry(userscripts);
     await this.applyUserScriptsNow(userscripts, applyNowUserScriptIds);
+    await this.sendTabSnapshot();
   }
 
   private async restoreCachedUserScripts(): Promise<void> {
@@ -1121,11 +1125,14 @@ class RuntimeClient {
     const userscripts = Array.isArray(stored[USERSCRIPT_REGISTRY_STORAGE_KEY])
       ? (stored[USERSCRIPT_REGISTRY_STORAGE_KEY] as UserScriptDefinition[])
       : [];
+    this.currentUserScripts = userscripts;
     await this.applyUserScriptRegistry(userscripts);
+    await this.sendTabSnapshot();
   }
 
   private async applyUserScriptRegistry(userscripts: UserScriptDefinition[]): Promise<void> {
     const userScriptsApi = this.getChromeUserScriptsApi();
+    this.registeredUserScriptIds.clear();
     if (!userScriptsApi?.register || !userScriptsApi.unregister) {
       console.warn('[WEB_CAP] chrome.userScripts.register is not available.');
       await this.storeUserScriptsAvailability(false);
@@ -1146,6 +1153,7 @@ class RuntimeClient {
       for (const script of activeScripts) {
         try {
           await userScriptsApi.register([script]);
+          this.registeredUserScriptIds.add(script.id);
         } catch (error) {
           console.warn('[WEB_CAP] failed to register userscript:', script.id, error);
         }
@@ -1371,6 +1379,7 @@ class RuntimeClient {
 
   private toTabSnapshot(tab: BrowserTabLike): RuntimeTabSnapshot {
     const rawUrl = typeof tab.url === 'string' ? tab.url : '';
+    const loadedUserScriptIds = this.loadedUserScriptIds(rawUrl);
     let site = '';
 
     // Newly created tabs can briefly report an empty or otherwise non-absolute URL
@@ -1388,9 +1397,26 @@ class RuntimeClient {
       url: rawUrl,
       title: tab.title ?? '',
       site,
+      ...(loadedUserScriptIds.length > 0
+        ? {
+            loadedUserScriptCount: loadedUserScriptIds.length,
+            loadedUserScriptIds,
+          }
+        : {}),
       readyState: 'complete',
       updatedAt: new Date().toISOString(),
     };
+  }
+
+  private loadedUserScriptIds(url: string): string[] {
+    if (!this.isUserScriptsAvailable()) {
+      return [];
+    }
+    return this.currentUserScripts
+      .filter((script) =>
+        this.registeredUserScriptIds.has(script.id) && userScriptMatchesUrl(script, url),
+      )
+      .map((script) => script.id);
   }
 
   private sendError(
