@@ -88,8 +88,36 @@ web-cap script-execute --tab-id <tab-id> --script-file .web-cap/example.com/read
 ## Multi-Page Workflows
 
 Use `cap.goto(url, nextInput)` when a script needs to continue after a full page
-navigation. Web Cap navigates to `url`, waits for the page to load, then reruns
-the same script with `nextInput` as the first `input` argument.
+navigation:
+
+- Web Cap navigates to `url`, waits for the page to load, then reruns the same
+  script with exactly `nextInput` as `input`.
+- `cap.goto` is a continuation, not final output. Every goto path must feed a
+  later branch in the same script.
+- That later branch must eventually return a normal JSON result, not another
+  identical `cap.goto`.
+- Carry every cross-page field you need through `nextInput`, especially `step`.
+
+```javascript
+export default async function (input = {}) {
+  if (input.step === "read") {
+    return {
+      ok: true,
+      url: location.href,
+      title: document.title,
+      text: document.body.innerText.slice(0, 4000)
+    };
+  }
+
+  const url = input.url;
+  if (!url) return { ok: false, error: "No URL provided" };
+
+  return cap.goto(url, { url, step: "read" });
+}
+```
+
+For longer workflows, give each page a distinct step and make the final step
+return a normal result:
 
 ```javascript
 /**

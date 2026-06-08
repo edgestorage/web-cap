@@ -25,6 +25,11 @@ import {
   type ScriptScreenshotArtifact,
   type ScriptExecutionResponse,
 } from '../runtime/execution-helpers';
+import {
+  createScriptGotoLoopDetector,
+  createScriptGotoLoopError,
+} from '../runtime/goto-loop-detection';
+import { assertNoStaticGotoLoops } from '../runtime/goto-static-analysis';
 import { BrowserCommandHandler } from '../runtime/browser-command-handler';
 import { UserScriptExecutor } from '../runtime/user-script-executor';
 
@@ -359,10 +364,12 @@ class RuntimeClient {
         executionPageIndicator,
         executionTabGroupIndicator,
       );
+      assertNoStaticGotoLoops(scriptDefinition.script.code);
 
       let response: ScriptExecutionResponse | undefined;
       let currentInput = input;
       let continuationCount = 0;
+      const gotoLoopDetector = createScriptGotoLoopDetector();
       const accumulatedEvents: ExecutionEvidenceEvent[] = [];
       const accumulatedScreenshotArtifacts: ScriptScreenshotArtifact[] = [];
 
@@ -430,6 +437,13 @@ class RuntimeClient {
         }
 
         const nextUrl = this.resolveScriptGotoUrl(continuation.url, activeTab.url);
+        const loopDetection = gotoLoopDetector.record({
+          url: nextUrl,
+          input: continuation.input,
+        });
+        if (loopDetection) {
+          throw createScriptGotoLoopError(loopDetection);
+        }
         accumulatedEvents.push({
           type: 'controlled_navigation',
           value: {

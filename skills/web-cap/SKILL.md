@@ -85,13 +85,13 @@ Write `script-execute` scripts as small browser functions with clear boundaries:
 
 - Accept variable behavior through input JSON.
 - Return structured JSON objects, not raw arrays or loose strings.
-- Include `ok`, `url`, and `title` when useful.
+- Include `ok` in structured results.
 - Normalize whitespace before returning page text.
 - Filter hidden elements with computed style and bounding boxes.
 - Use waits sparingly and expose timing through result fields when it affects reliability.
 - For destructive actions, return a preview plan first unless the user explicitly asked to perform the action.
-- For controlled multi-page workflows, return `cap.goto(url, nextInput)`. Web Cap navigates to `url`, then reruns the same script with `nextInput` as `input`.
-- Page/script state is lost after a `cap.goto` navigation. Manage all post-goto state yourself through `input`; Web Cap does not merge previous input, increment indexes, advance pages, or remember progress automatically.
+- For controlled multi-page workflows, return `cap.goto(url, nextInput)`. Web Cap navigates to `url`, then reruns the same script with exactly `nextInput` as `input`; `cap.goto` is a continuation, not final output.
+- Because page/script state is lost after navigation, carry all needed state in `nextInput` and handle it at the top of the same script. Every goto workflow must eventually return a normal JSON result, not another `cap.goto(...)`.
 
 Example one-off read:
 
@@ -127,31 +127,27 @@ export default async function (input) {
 }
 ```
 
-Example controlled multi-page workflow:
+Example controlled navigation:
 
-`cap.goto(url, nextInput)` is a continuation. After the page changes, the same script runs again with exactly `nextInput` as `input`. Carry every cross-page field you need, such as `step`, `index`, `urls`, and accumulated `results`.
+`cap.goto(url, nextInput)` is a continuation: every goto path must feed a later branch in the same script, and that branch must eventually return a normal JSON result. Carry every cross-page field you need through `nextInput`.
+
+Minimal pattern:
 
 ```javascript
 export default async function (input = {}) {
-  if (!input.step) {
-    return cap.goto("/results", { step: "results", query: input.query });
+  if (input.step === "read") {
+    return {
+      ok: true,
+      url: location.href,
+      title: document.title,
+      text: document.body.innerText.slice(0, 4000)
+    };
   }
 
-  if (input.step === "results") {
-    const href = await page.locator("a").first().getAttribute("href");
-    if (!href) {
-      return { ok: false, error: "No result link found.", url: location.href, title: document.title };
-    }
-    return cap.goto(href, { step: "detail", query: input.query, href });
-  }
+  const url = input.url;
+  if (!url) return { ok: false, error: "No URL provided" };
 
-  return {
-    ok: true,
-    query: input.query,
-    href: input.href,
-    url: location.href,
-    title: document.title
-  };
+  return cap.goto(url, { url, step: "read" });
 }
 ```
 
