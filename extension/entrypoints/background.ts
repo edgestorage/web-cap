@@ -31,6 +31,7 @@ import {
 } from '../runtime/goto-loop-detection';
 import { assertNoStaticGotoLoops } from '../runtime/goto-static-analysis';
 import { BrowserCommandHandler } from '../runtime/browser-command-handler';
+import { createExecutionTabGroupOptions } from '../runtime/tab-group-indicator';
 import { UserScriptExecutor } from '../runtime/user-script-executor';
 
 const PROTOCOL_VERSION = '2026-05-05';
@@ -59,6 +60,7 @@ interface BrowserTabLike {
   active?: boolean;
   openerTabId?: number;
   groupId?: number;
+  windowId?: number;
 }
 
 type ExecutableBrowserTab = BrowserTabLike & {
@@ -111,7 +113,10 @@ interface BrowserTabGroupLike {
 
 interface NativeTabGroupsApi {
   tabs?: {
-    group(options: { tabIds: number | number[] }): Promise<number>;
+    group(options: {
+      tabIds: number | number[];
+      createProperties?: { windowId?: number };
+    }): Promise<number>;
     ungroup(tabIds: number | number[]): Promise<void>;
   };
   tabGroups?: {
@@ -951,7 +956,12 @@ class RuntimeClient {
     let groupId: number;
     let createdGroup = false;
     if (typeof tab.groupId !== 'number' || tab.groupId < 0) {
-      groupId = await tabGroupsApi.tabs.group({ tabIds: tabId });
+      groupId = await tabGroupsApi.tabs.group(
+        createExecutionTabGroupOptions({
+          id: tabId,
+          windowId: tab.windowId,
+        }),
+      );
       createdGroup = true;
     } else {
       groupId = tab.groupId;
