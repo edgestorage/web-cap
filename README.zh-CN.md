@@ -54,6 +54,25 @@ web-cap session-status
 - 支持创建浏览器标签页和监听页面事件，适合 agent 工作流。
 - 默认使用本地优先的状态存储。
 
+## 可复用脚本 Hub
+
+Web Cap 可以从本地 `.web-cap/` 目录运行可复用 capability scripts。共享的 [Web Cap Hub](https://github.com/edgestorage/web-cap-hub) 仓库收集了面向常见网站的现成脚本，也可以作为编写新站点工作流的示例。
+
+复用 hub 中的脚本：
+
+```bash
+git clone https://github.com/edgestorage/web-cap-hub.git
+cd web-cap-hub
+
+web-cap session-status
+web-cap script-execute \
+  --tab-id <tab-id> \
+  --script-file .web-cap/github.com/read-repository-summary.js \
+  --input '{"owner":"edgestorage","repo":"web-cap"}'
+```
+
+当前脚本集合和贡献说明见 [Web Cap Hub README](https://github.com/edgestorage/web-cap-hub)。
+
 ## 为什么是 Script-First
 
 很多浏览器自动化工具会提供一组固定的直接动作：点击某个 selector、填写某个输入框、读取某段文本、截屏。Web Cap 采用的是 script-first 方式。

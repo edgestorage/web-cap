@@ -54,6 +54,25 @@ web-cap session-status
 - Browser tab creation and event watching commands for agent workflows.
 - Local-first state storage by default.
 
+## Reusable Script Hub
+
+Web Cap can run reusable capability scripts from a local `.web-cap/` directory. The shared [Web Cap Hub](https://github.com/edgestorage/web-cap-hub) repository collects ready-to-use scripts for common websites and provides examples for writing new site-specific workflows.
+
+To reuse scripts from the hub:
+
+```bash
+git clone https://github.com/edgestorage/web-cap-hub.git
+cd web-cap-hub
+
+web-cap session-status
+web-cap script-execute \
+  --tab-id <tab-id> \
+  --script-file .web-cap/github.com/read-repository-summary.js \
+  --input '{"owner":"edgestorage","repo":"web-cap"}'
+```
+
+See the [Web Cap Hub README](https://github.com/edgestorage/web-cap-hub) for the current script collection and contribution guidelines.
+
 ## Why Script-First
 
 Many browser automation tools expose a fixed set of direct actions: click this selector, fill that input, read this text, take a screenshot. Web Cap takes a script-first approach instead.
