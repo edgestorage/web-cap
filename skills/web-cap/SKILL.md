@@ -67,6 +67,7 @@ When using saved reusable Web Cap scripts:
 - Execute saved scripts with `script-execute --tab-id <tab-id> --script-file <path>`.
 - Use `--script-file -` to read script source from stdin, and `--input-file -` to read JSON input from stdin. Prefer stdin for long generated scripts or JSON input that would be awkward to shell-escape.
 - Do not use `--script-file -` and `--input-file -` in the same command, because stdin can only be consumed once.
+- Before writing any file under `${WEB_CAP_PATH}` or a reusable script domain directory, read `references/how-to-write-reusable-scripts.md`.
 - When saving a new reusable script, write it to `${WEB_CAP_PATH}/<domain>/<capability-name>.js`.
 - Follow `references/how-to-write-reusable-scripts.md` for reusable script metadata, naming, examples, and README format.
 

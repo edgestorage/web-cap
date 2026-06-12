@@ -7,6 +7,7 @@ import type {
 } from './playwright-shim-types.injected';
 import { installManagedClickHook } from './managed-click.injected';
 import { captureVisibleElementsDiff } from './visible-elements.injected';
+import { focusElementWithoutScrolling, scrollElementIntoViewIfNeeded } from './playwright-shim-helpers.injected';
 
 type RuntimeJsonObject = Record<string, unknown>;
 const WEB_CAP_GOTO_CONTINUATION_TYPE = 'web_cap.goto';
@@ -683,8 +684,8 @@ export async function runScriptRuntime({
       throw new Error('Keyboard typing target must be an HTMLElement.');
     }
 
-    element.scrollIntoView?.({ block: 'center', inline: 'center' });
-    element.focus?.();
+    scrollElementIntoViewIfNeeded(element);
+    focusElementWithoutScrolling(element);
 
     if (!bridgeFunction || !isEditableElement(element)) {
       if (

@@ -939,7 +939,7 @@ export function installManagedClickHook(
           if (!isCurrentManagedGeneration()) {
             return;
           }
-          element.focus?.();
+          element.focus?.({ preventScroll: true });
           await Promise.resolve(
             bridgeFunction({
               action,
@@ -959,7 +959,7 @@ export function installManagedClickHook(
         if (!isCurrentManagedGeneration()) {
           return;
         }
-        element.focus?.();
+        element.focus?.({ preventScroll: true });
 
         activeSyntheticClickDepth += 1;
         try {

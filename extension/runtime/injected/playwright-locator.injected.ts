@@ -1,6 +1,6 @@
 /* eslint-disable */
 import type { LocatorQuery, PlaywrightShimDeps, RuntimeMethodTable, ScriptPlaywrightLocator, ScriptPlaywrightPage } from './playwright-shim-types.injected';
-import { accessibleName, cssEscape, hideHighlightOverlay, implicitRole, isVisibleElement, notImplemented, pressKeyOnElement, queryLocatorSelectorAll, showHighlightOverlay, smallestTextMatches, textMatches, timeoutFromOptions, waitForLocator } from './playwright-shim-helpers.injected';
+import { accessibleName, cssEscape, focusElementWithoutScrolling, hideHighlightOverlay, implicitRole, isVisibleElement, notImplemented, pressKeyOnElement, queryLocatorSelectorAll, scrollElementIntoViewIfNeeded, showHighlightOverlay, smallestTextMatches, textMatches, timeoutFromOptions, waitForLocator } from './playwright-shim-helpers.injected';
 
 const PLAYWRIGHT_LOCATOR_METHODS = [
   'elementHandle',
@@ -172,7 +172,6 @@ export function createLocator(
       if (!(element instanceof HTMLElement)) {
         throw new Error(`Locator ${label} did not resolve to an HTMLElement.`);
       }
-      element.scrollIntoView?.({ block: 'center', inline: 'center' });
       element.click();
       await deps.waitForManagedInput();
     },
@@ -181,7 +180,6 @@ export function createLocator(
       if (!(element instanceof HTMLElement)) {
         throw new Error(`Locator ${label} did not resolve to an HTMLElement.`);
       }
-      element.scrollIntoView?.({ block: 'center', inline: 'center' });
       element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
       element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
       element.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
@@ -281,7 +279,7 @@ export function createLocator(
     async focus(options?: unknown) {
       const element = await requireElement({ timeout: timeoutFromOptions(options) });
       if (element instanceof HTMLElement) {
-        element.focus();
+        focusElementWithoutScrolling(element);
       }
     },
     async blur(options?: unknown) {
@@ -483,7 +481,7 @@ export function createLocator(
     async scrollIntoViewIfNeeded(options?: unknown) {
       const element = await requireElement({ timeout: timeoutFromOptions(options) });
       if (element instanceof HTMLElement) {
-        element.scrollIntoView?.({ block: 'center', inline: 'center' });
+        scrollElementIntoViewIfNeeded(element);
       }
     },
     async screenshot(options: { type?: unknown; quality?: unknown } = {}) {
@@ -494,7 +492,7 @@ export function createLocator(
       if (!deps.browserCommand) {
         throw new Error('locator.screenshot requires the debugger CDP bridge.');
       }
-      element.scrollIntoView?.({ block: 'center', inline: 'center' });
+      scrollElementIntoViewIfNeeded(element);
       const rect = element.getBoundingClientRect();
       const format = options.type === 'jpeg' ? 'jpeg' : 'png';
       const params: Record<string, unknown> = {

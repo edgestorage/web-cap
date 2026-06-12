@@ -85,6 +85,37 @@ export function isVisibleElement(element: unknown) {
   return rect.width > 0 && rect.height > 0;
 }
 
+export function elementHasVisibleViewportArea(element: HTMLElement) {
+  if (!isVisibleElement(element)) {
+    return false;
+  }
+  const rect = element.getBoundingClientRect();
+  const view = element.ownerDocument?.defaultView ?? globalThis;
+  const viewportWidth = Number(view.innerWidth ?? globalThis.innerWidth ?? 0);
+  const viewportHeight = Number(view.innerHeight ?? globalThis.innerHeight ?? 0);
+  if (viewportWidth <= 0 || viewportHeight <= 0) {
+    return true;
+  }
+  return (
+    rect.right > 0 &&
+    rect.bottom > 0 &&
+    rect.left < viewportWidth &&
+    rect.top < viewportHeight
+  );
+}
+
+export function scrollElementIntoViewIfNeeded(element: HTMLElement) {
+  if (!elementHasVisibleViewportArea(element)) {
+    element.scrollIntoView?.({ block: 'center', inline: 'center' });
+    return true;
+  }
+  return false;
+}
+
+export function focusElementWithoutScrolling(element: HTMLElement) {
+  element.focus?.({ preventScroll: true });
+}
+
 const HIGHLIGHT_OVERLAY_ID = '__web-cap-playwright-highlight';
 
 export function hideHighlightOverlay() {
@@ -235,8 +266,8 @@ export async function pressKeyOnElement(element: unknown, key: unknown, deps: Pl
     bubbles: true,
     cancelable: true,
   };
-  element.scrollIntoView?.({ block: 'center', inline: 'center' });
-  element.focus?.();
+  scrollElementIntoViewIfNeeded(element);
+  focusElementWithoutScrolling(element);
   element.dispatchEvent(new KeyboardEvent('keydown', eventInit));
   if (keyInfo.key.length === 1 || keyInfo.key === 'Enter') {
     element.dispatchEvent(new KeyboardEvent('keypress', eventInit));

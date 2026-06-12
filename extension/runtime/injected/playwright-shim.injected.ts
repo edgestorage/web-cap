@@ -476,7 +476,7 @@ function createPageApi(): ScriptPlaywrightPage {
           if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement)) {
             throw new Error('Frame locator fill target is not editable.');
           }
-          element.focus();
+          element.focus({ preventScroll: true });
           element.value = ${valueJson};
           element.dispatchEvent(new Event('input', { bubbles: true }));
           element.dispatchEvent(new Event('change', { bubbles: true }));
@@ -491,7 +491,7 @@ function createPageApi(): ScriptPlaywrightPage {
         await evaluateInFrame(frameId, `(() => {
           const element = (${queryAllExpression})[0] ?? null;
           if (!(element instanceof HTMLElement)) throw new Error('Frame locator press target is not an HTMLElement.');
-          element.focus();
+          element.focus({ preventScroll: true });
           const key = ${keyJson};
           element.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
           element.dispatchEvent(new KeyboardEvent('keyup', { key, bubbles: true, cancelable: true }));
