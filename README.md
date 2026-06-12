@@ -47,7 +47,7 @@ web-cap session-status
 
 ## Features
 
-- Browser extension runtime for real Chrome/Firefox tabs.
+- Browser extension runtime for real Chromium-based browser tabs.
 - Command-line interface for script execution, registration, tab creation, and user handoff observation.
 - Playwright-style page helpers for common operations such as inspect, wait, click, fill, query, and text reading.
 - Local script registry for reusable browser workflows.
@@ -79,6 +79,12 @@ Many browser automation tools expose a fixed set of direct actions: click this s
 
 Agents can run JavaScript inside the page with Playwright-style helpers and register useful scripts as reusable browser skills. This makes Web Cap better suited for workflows where an agent needs to inspect page structure, adapt to product-specific UI, and turn a successful operation into something it can run again later.
 
+Web Cap is not designed to make agents rediscover the same browser workflow every time. Its core value is turning verified browser operations into reusable scripts and reusable workflows.
+
+For recurring pages and tasks, agents can reuse stable workflows instead of repeatedly reading the page, planning each step, finding the right controls, and recovering from mistakes. This can improve accuracy and execution speed while reducing token usage and time spent on repeated browser exploration.
+
+In this sense, Web Cap works well as a browser capability layer for Codex, Claude Code, or other local agent tools: the model can focus on understanding goals and making decisions, while stable browser operations are handled by local reusable automation.
+
 Compared with action-first browser tools, Web Cap focuses on:
 
 - In-page execution, so scripts can work directly with the DOM and page state.
@@ -100,6 +106,30 @@ That means an agent does not only get a script's declared JSON result. It can al
 - Local execution history: inline scripts are tracked locally with status and result metadata. Temporary script ids remain callable while they are in the latest local history entries.
 - Success-gated registration: `--register` only persists a script when its execution result includes `ok: true`, which helps keep the reusable script registry clean.
 - Tab-aware execution: commands can target a specific `--tab-id`, while default execution follows the active connected browser tab.
+
+## Roadmap
+
+This roadmap outlines the planned development directions for Web Cap and Web Cap Hub.
+
+### Web Cap Hub CLI
+
+Provide quick installation and download support for reusable scripts.
+
+### Firefox Extension
+
+Provide Firefox browser extension support.
+
+### Client Build and Distribution Improvements
+
+Reduce dependency on the Node.js and npm environment, and explore simpler installation, build, and distribution paths.
+
+### Browser-Side AI Chat and Local AI Tool Integration
+
+Provide an in-browser AI chat entry point that connects to local tools such as Codex and Claude Code for actual execution.
+
+### Move Script Compilation to the Client
+
+Move heavier TypeScript compilation-related responsibilities from the browser extension to the client to reduce extension size and complexity.
 
 ## How It Works
 
@@ -136,7 +166,7 @@ The browser extension connects to the local runtime and executes commands agains
 
 - Node.js 20 or newer
 - pnpm 9.x
-- A Chromium-based browser or Firefox for extension development
+- A Chromium-based browser for the current extension runtime
 
 ## Development Quick Start
 
@@ -150,12 +180,6 @@ Start the extension development build:
 
 ```bash
 pnpm dev
-```
-
-For Firefox:
-
-```bash
-pnpm dev:firefox
 ```
 
 Load the generated extension from WXT's output directory, then open a normal `http` or `https` page.
@@ -265,12 +289,6 @@ Build the browser extension:
 pnpm build
 ```
 
-Build the Firefox extension:
-
-```bash
-pnpm build:firefox
-```
-
 Build the npm CLI package:
 
 ```bash
@@ -287,7 +305,6 @@ Create extension zip packages:
 
 ```bash
 pnpm zip
-pnpm zip:firefox
 ```
 
 ## Quality Checks
@@ -308,6 +325,7 @@ When a version tag matching `v*` is pushed, the workflow also creates a GitHub R
 ## Known Limitations
 
 - The extension targets normal `http` and `https` pages.
+- The current runtime is primarily validated on Chromium-based browsers; Firefox compatibility is still planned work.
 - Restricted browser pages such as `chrome://` are intentionally out of scope.
 - Scripts execute in-page and rely on the injected Playwright-style `page` helper.
 - Manual validation with a loaded browser extension is recommended before release.
