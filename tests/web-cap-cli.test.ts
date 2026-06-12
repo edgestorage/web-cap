@@ -135,6 +135,199 @@ describe('WEB_CAP CLI', () => {
     });
   });
 
+  it('validates reusable script metadata for script files under WEB_CAP_PATH', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'web-cap-cli-test-'));
+    const webCapPath = join(tempDir, '.web-cap');
+    const scriptFile = join(webCapPath, 'example.com', 'read-page-summary.js');
+    await mkdir(join(webCapPath, 'example.com'), { recursive: true });
+    await writeFile(
+      scriptFile,
+      `/**
+ * web-cap script
+ *
+ * @description Read a compact summary of the current page.
+ * @param {object} input
+ * @match https://example.com/articles/:articleId, https://example.com/docs/*
+ */
+export default async function () { return { ok: true }; }`,
+    );
+
+    await expect(
+      buildScriptExecuteRequest(
+        {
+          scriptFile,
+          tabId: 42,
+        },
+        {
+          env: { WEB_CAP_PATH: webCapPath },
+        },
+      ),
+    ).resolves.toMatchObject({
+      input: {},
+      options: {
+        tabId: 42,
+      },
+    });
+  });
+
+  it('rejects reusable scripts under WEB_CAP_PATH without required metadata', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'web-cap-cli-test-'));
+    const webCapPath = join(tempDir, '.web-cap');
+    const scriptFile = join(webCapPath, 'example.com', 'read-page-summary.js');
+    await mkdir(join(webCapPath, 'example.com'), { recursive: true });
+    await writeFile(scriptFile, 'export default async function () { return { ok: true }; }');
+
+    await expect(
+      buildScriptExecuteRequest(
+        {
+          scriptFile,
+          tabId: 42,
+        },
+        {
+          env: { WEB_CAP_PATH: webCapPath },
+        },
+      ),
+    ).rejects.toThrow(/metadata JSDoc block/);
+  });
+
+  it('rejects reusable scripts under WEB_CAP_PATH without a web-cap script marker', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'web-cap-cli-test-'));
+    const webCapPath = join(tempDir, '.web-cap');
+    const scriptFile = join(webCapPath, 'example.com', 'read-page-summary.js');
+    await mkdir(join(webCapPath, 'example.com'), { recursive: true });
+    await writeFile(
+      scriptFile,
+      `/**
+ * not web-cap script
+ *
+ * @description Read a compact summary of the current page.
+ * @match https://example.com/*
+ */
+export default async function () { return { ok: true }; }`,
+    );
+
+    await expect(
+      buildScriptExecuteRequest(
+        {
+          scriptFile,
+          tabId: 42,
+        },
+        {
+          env: { WEB_CAP_PATH: webCapPath },
+        },
+      ),
+    ).rejects.toThrow(/first line is "web-cap script"/);
+  });
+
+  it('rejects reusable scripts under WEB_CAP_PATH without a description', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'web-cap-cli-test-'));
+    const webCapPath = join(tempDir, '.web-cap');
+    const scriptFile = join(webCapPath, 'example.com', 'read-page-summary.js');
+    await mkdir(join(webCapPath, 'example.com'), { recursive: true });
+    await writeFile(
+      scriptFile,
+      `/**
+ * web-cap script
+ *
+ * @match https://example.com/*
+ */
+export default async function () { return { ok: true }; }`,
+    );
+
+    await expect(
+      buildScriptExecuteRequest(
+        {
+          scriptFile,
+          tabId: 42,
+        },
+        {
+          env: { WEB_CAP_PATH: webCapPath },
+        },
+      ),
+    ).rejects.toThrow(/requires @description/);
+  });
+
+  it('rejects reusable scripts under WEB_CAP_PATH without match patterns', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'web-cap-cli-test-'));
+    const webCapPath = join(tempDir, '.web-cap');
+    const scriptFile = join(webCapPath, 'example.com', 'read-page-summary.js');
+    await mkdir(join(webCapPath, 'example.com'), { recursive: true });
+    await writeFile(
+      scriptFile,
+      `/**
+ * web-cap script
+ *
+ * @description Read a compact summary of the current page.
+ */
+export default async function () { return { ok: true }; }`,
+    );
+
+    await expect(
+      buildScriptExecuteRequest(
+        {
+          scriptFile,
+          tabId: 42,
+        },
+        {
+          env: { WEB_CAP_PATH: webCapPath },
+        },
+      ),
+    ).rejects.toThrow(/requires at least one @match/);
+  });
+
+  it('rejects reusable scripts under WEB_CAP_PATH with invalid match patterns', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'web-cap-cli-test-'));
+    const webCapPath = join(tempDir, '.web-cap');
+    const scriptFile = join(webCapPath, 'example.com', 'read-page-summary.js');
+    await mkdir(join(webCapPath, 'example.com'), { recursive: true });
+    await writeFile(
+      scriptFile,
+      `/**
+ * web-cap script
+ *
+ * @description Read a compact summary of the current page.
+ * @match example.com/*
+ */
+export default async function () { return { ok: true }; }`,
+    );
+
+    await expect(
+      buildScriptExecuteRequest(
+        {
+          scriptFile,
+          tabId: 42,
+        },
+        {
+          env: { WEB_CAP_PATH: webCapPath },
+        },
+      ),
+    ).rejects.toThrow(/Expected a full URL pattern/);
+  });
+
+  it('does not validate reusable script metadata outside WEB_CAP_PATH', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'web-cap-cli-test-'));
+    const scriptFile = join(tempDir, 'script.js');
+    const webCapPath = join(tempDir, '.web-cap');
+    await writeFile(scriptFile, 'export default async function () { return { ok: true }; }');
+
+    await expect(
+      buildScriptExecuteRequest(
+        {
+          scriptFile,
+          tabId: 42,
+        },
+        {
+          env: { WEB_CAP_PATH: webCapPath },
+        },
+      ),
+    ).resolves.toMatchObject({
+      input: {},
+      options: {
+        tabId: 42,
+      },
+    });
+  });
+
   it('loads script from stdin when script-file is dash', async () => {
     const command = parseCliArgs(['script-execute', '--script-file', '-', '--tab-id', '42']);
 

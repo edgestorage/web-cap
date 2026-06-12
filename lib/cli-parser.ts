@@ -1,8 +1,11 @@
 import { readFile } from 'node:fs/promises';
+import { realpath } from 'node:fs/promises';
+import { relative, resolve, sep } from 'node:path';
 import { Command, InvalidArgumentError } from 'commander';
 import type { ExecuteScriptRequest } from './server/agent/contracts';
 import { formatError } from './daemon-bootstrap';
 import type { WebCapConfigKey, WebCapEvidenceConfig } from './config';
+import { parseReusableScriptHeader } from './server/scripts/reusable-script-parser';
 
 export interface ScriptExecuteCliOptions {
   script?: string;
@@ -20,6 +23,7 @@ export interface ScriptExecuteRequestReaders {
   readScriptFile?: (path: string) => Promise<string>;
   readInputFile?: (path: string) => Promise<string>;
   readStdin?: () => Promise<string>;
+  env?: NodeJS.ProcessEnv;
 }
 
 export interface JsonOutputCliOptions {
@@ -146,7 +150,7 @@ export async function buildScriptExecuteRequest(
     (options.scriptFile
       ? options.scriptFile === '-'
         ? await readStdin()
-        : await readScriptFile(options.scriptFile)
+        : await readValidatedScriptFile(options.scriptFile, readScriptFile, readers.env ?? process.env)
       : undefined);
   if (!script || script.trim().length === 0) {
     throw new Error('script-execute requires --script or --script-file.');
@@ -183,6 +187,39 @@ export async function buildScriptExecuteRequest(
   }
 
   return request;
+}
+
+async function readValidatedScriptFile(
+  scriptFile: string,
+  readScriptFile: (path: string) => Promise<string>,
+  env: NodeJS.ProcessEnv,
+): Promise<string> {
+  const script = await readScriptFile(scriptFile);
+  if (await isInsideWebCapPath(scriptFile, env)) {
+    parseReusableScriptHeader(script);
+  }
+  return script;
+}
+
+async function isInsideWebCapPath(scriptFile: string, env: NodeJS.ProcessEnv): Promise<boolean> {
+  const scriptPath = await realpathOrResolve(scriptFile);
+  const webCapPath = await realpathOrResolve(env.WEB_CAP_PATH ?? '.web-cap');
+  const pathFromWebCapRoot = relative(webCapPath, scriptPath);
+  return (
+    pathFromWebCapRoot.length > 0 &&
+    !pathFromWebCapRoot.startsWith('..') &&
+    !pathFromWebCapRoot.startsWith(`..${sep}`) &&
+    pathFromWebCapRoot !== '..' &&
+    !pathFromWebCapRoot.startsWith(sep)
+  );
+}
+
+async function realpathOrResolve(path: string): Promise<string> {
+  try {
+    return await realpath(path);
+  } catch {
+    return resolve(path);
+  }
 }
 
 export async function readProcessStdin(): Promise<string> {
