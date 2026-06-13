@@ -20,15 +20,31 @@ Agents interact with Web Cap through the `web-cap` CLI. The CLI manages the requ
 
    - Open the [Web Cap Releases](https://github.com/edgestorage/web-cap/releases) page.
    - Download the Chrome extension zip asset, named like `*chrome*.zip`.
+   - Unzip the downloaded extension asset.
    - Open `chrome://extensions` in Chrome.
    - Enable Developer mode.
-   - Drag the downloaded zip file into the extensions page.
+   - Drag the unzipped extension folder into the extensions page.
+   - Open the Web Cap extension details and enable `Allow User Scripts`.
 
 3. Check that the CLI can see the browser runtime:
 
    ```bash
    web-cap session-status
    ```
+
+## Examples
+
+### Reuse a Web Cap Hub script on Hacker News
+
+Run a reusable script from [web-cap-hub](https://github.com/edgestorage/web-cap-hub) to summarize the comments on the first five Hacker News posts from the current page with less page exploration, fewer tokens, and faster execution.
+
+![Web Cap Hacker News reusable script example](https://raw.githubusercontent.com/edgestorage/web-cap-docs/main/examples/example-hn.gif)
+
+### Hide a YouTube section with one sentence
+
+Hide the `Top live games` block on YouTube Gaming with one sentence, and keep it hidden on future visits.
+
+![Web Cap YouTube userscript example](https://raw.githubusercontent.com/edgestorage/web-cap-docs/main/examples/example-userscript-youtube.gif)
 
 ## Install CLI Manually
 
