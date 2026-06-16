@@ -1,10 +1,12 @@
-# Web Cap
+# Web-Capability
 
 [中文说明](./README.zh-CN.md)
 
-Web Cap is a local-first browser automation toolkit for agents. It lets agents inspect real browser tabs, run reusable in-page scripts, and save successful scripts for later command-line use.
+Script-first web capabilities for AI agents. Run in-page scripts, save workflows as reusable capabilities, and generate AI-native userscripts.
 
-Agents interact with Web Cap through the `web-cap` CLI. The CLI manages the required local runtime automatically, so users do not need a separate startup command.
+Web-Capability is a local-first browser automation toolkit for agents. It lets agents inspect real browser tabs, run reusable in-page scripts, save successful workflows for later command-line use, and turn natural-language browser requests into AI-native userscripts.
+
+Agents interact with Web-Capability through the `web-cap` CLI. The CLI manages the required local runtime automatically, so users do not need a separate startup command.
 
 ## Quick Use
 
@@ -67,6 +69,7 @@ web-cap session-status
 - Command-line interface for script execution, registration, tab creation, and user handoff observation.
 - Playwright-style page helpers for common operations such as inspect, wait, click, fill, query, and text reading.
 - Local script registry for reusable browser workflows.
+- AI-native userscript generation for persistent, page-specific browser changes.
 - Browser tab creation and event watching commands for agent workflows.
 - Local-first state storage by default.
 

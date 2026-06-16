@@ -1,10 +1,12 @@
-# Web Cap 中文说明
+# Web-Capability 中文说明
 
 [English](./README.md)
 
-Web Cap 是一个本地优先的浏览器自动化工具，面向 agent 使用。它可以让 agent 检查真实浏览器标签页、执行可复用的页面脚本，并把成功的脚本保存到本地，后续继续通过命令行调用。
+面向 AI agent 的 script-first Web 能力层。运行页面内脚本，把工作流保存为可复用 capability，并生成 AI-native userscript。
 
-Agent 通过 `web-cap` CLI 使用 Web Cap。CLI 会自动管理所需的本地运行时，用户不需要额外的启动命令。
+Web-Capability 是一个本地优先的浏览器自动化工具，面向 agent 使用。它可以让 agent 检查真实浏览器标签页、执行可复用的页面脚本，把成功的工作流保存到本地后续继续通过命令行调用，并把自然语言浏览器需求生成可长期生效的 userscript。
+
+Agent 通过 `web-cap` CLI 使用 Web-Capability。CLI 会自动管理所需的本地运行时，用户不需要额外的启动命令。
 
 ## 快速使用
 
@@ -67,6 +69,7 @@ web-cap session-status
 - 提供脚本执行、注册、创建标签页和用户接手观察能力的命令行接口。
 - Playwright 风格的 page helper，用于 inspect、wait、click、fill、query、read text 等常见页面操作。
 - 本地脚本注册表，用于沉淀可复用浏览器工作流。
+- AI-native userscript 生成能力，用于持久化特定页面上的浏览器改动。
 - 支持创建浏览器标签页和监听页面事件，适合 agent 工作流。
 - 默认使用本地优先的状态存储。
 
